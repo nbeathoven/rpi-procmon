@@ -1,4 +1,4 @@
-module rpi-procmon-health-tool-app
+module github.com/nbeathoven/rpi-procmon
 
 go 1.24.0
 
