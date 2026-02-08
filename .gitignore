@@ -1,0 +1,11 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Local builds
+/rpi-procmon-health-tool-app
+/ma352-procmon
