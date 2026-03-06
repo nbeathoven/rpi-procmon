@@ -19,16 +19,49 @@
 - `main.go`: monitor engine, checks, recovery actions, persistence, and API server.
 - `main_test.go`: coverage for config loading, recovery flow, and API exposure.
 - `configs/example.json`: example multi-monitor configuration for `ma352` and `scrypted-arlo`.
+- `scripts/bootstrap-rpi.sh`: first-time Raspberry Pi deployment helper.
 - `systemd/rpi-procmon.service`: long-running systemd service.
 - `systemd/rpi-procmon.env.example`: environment file example.
 
-## Build
+## Fresh Raspberry Pi Deployment
+
+For a first install on a fresh Raspberry Pi, run the interactive bootstrap script:
+
+```bash
+sudo ./scripts/bootstrap-rpi.sh
+```
+
+The script will:
+- install Go if it is missing
+- build `rpi-procmon`
+- ask which services you want to monitor
+- generate `/etc/rpi-procmon/config.json`
+- install `/etc/default/rpi-procmon`
+- install and start `rpi-procmon.service`
+
+Current monitor templates in the bootstrap flow:
+- `MA352 bridge`
+- `Scrypted Arlo`
+- `Generic systemd service`
+
+The script also prints the final config directory and config file path after deployment.
+
+## MA352 Template
+
+The `ma352` monitor is intended for the McIntosh amplifier bridge service from [homebridge-mcintosh-rs232](https://github.com/nbeathoven/homebridge-mcintosh-rs232).
+
+The template assumes:
+- systemd service name similar to `ma352-bridge`
+- local health endpoint similar to `http://127.0.0.1:5000/health`
+- recovery by restarting the bridge service and rechecking health
+
+## Manual Build
 
 ```bash
 go build -ldflags "-X main.appVersion=$(git rev-parse --short HEAD)" -o /usr/local/bin/rpi-procmon
 ```
 
-## Configure
+## Manual Configure
 
 1. Create config and env locations:
 
@@ -42,7 +75,7 @@ sudo cp systemd/rpi-procmon.env.example /etc/default/rpi-procmon
 
 The Scrypted example intentionally ships with a failing placeholder plugin restart command. Replace it with your real Arlo plugin restart command before enabling automated recovery.
 
-## Install Service
+## Manual Install Service
 
 ```bash
 sudo cp systemd/rpi-procmon.service /etc/systemd/system/rpi-procmon.service
