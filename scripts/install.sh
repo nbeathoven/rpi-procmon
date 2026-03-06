@@ -39,6 +39,7 @@ ensure_base_packages() {
   ensure_apt_package curl
   ensure_apt_package python3
   ensure_apt_package tar
+  ensure_apt_package logrotate
 }
 
 clone_or_update_repo() {

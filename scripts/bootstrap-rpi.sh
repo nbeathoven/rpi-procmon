@@ -12,6 +12,19 @@ DEFAULT_BIN_PATH="/usr/local/bin/rpi-procmon"
 TMP_MONITORS="$(mktemp)"
 GO_BIN=""
 
+ensure_logrotate() {
+  if command -v logrotate >/dev/null 2>&1; then
+    return
+  fi
+  if command -v apt-get >/dev/null 2>&1 && command -v dpkg >/dev/null 2>&1; then
+    echo "Installing logrotate..."
+    apt-get update
+    apt-get install -y logrotate
+    return
+  fi
+  echo "logrotate not found. Install it manually to enable log rotation."
+}
+
 cleanup() {
   rm -f "$TMP_MONITORS"
 }
@@ -371,6 +384,7 @@ install_service_files() {
   local log_file="$4"
   local state_file="$5"
   local api_addr="$6"
+  local logrotate_file="/etc/logrotate.d/rpi-procmon"
 
   install -d -m 0755     "$(dirname "$BIN_PATH")"     "$(dirname "$env_file")"     "$(dirname "$service_file")"     "$(dirname "$config_file")"     "$(dirname "$state_file")"     "$(dirname "$log_file")"
 
@@ -402,6 +416,10 @@ PROC_API_LISTEN_ADDR=$api_addr
 PROC_API_READ_HEADER_TIMEOUT=5s
 EOF_ENV
   touch "$log_file"
+  if [[ -f "$REPO_DIR/systemd/rpi-procmon.logrotate" ]]; then
+    install -m 0644 "$REPO_DIR/systemd/rpi-procmon.logrotate" "$logrotate_file"
+    sed -i "s#/var/log/rpi-procmon.log#$log_file#" "$logrotate_file"
+  fi
 }
 
 add_ma352_monitor() {
@@ -506,6 +524,7 @@ main() {
     exit 1
   fi
 
+  ensure_logrotate
   ensure_go
   build_binary
   write_config_file "$config_file" "$api_addr" "$log_file" "$state_file"

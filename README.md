@@ -21,8 +21,10 @@
 - `configs/example.json`: example multi-monitor configuration for `ma352` and `scrypted-arlo`.
 - `scripts/bootstrap-rpi.sh`: first-time Raspberry Pi deployment helper.
 - `scripts/install.sh`: one-line remote installer for fresh Raspberry Pi hosts.
+- `scripts/uninstall.sh`: safe uninstall script with optional `--purge` cleanup.
 - `systemd/rpi-procmon.service`: long-running systemd service.
 - `systemd/rpi-procmon.env.example`: environment file example.
+- `systemd/rpi-procmon.logrotate`: log retention policy installed under `/etc/logrotate.d/`.
 
 ## Fresh Raspberry Pi Deployment
 
@@ -44,6 +46,7 @@ sudo ./scripts/bootstrap-rpi.sh
 ```
 
 The script will:
+- install `logrotate` if it is missing
 - install Go if it is missing
 - build `rpi-procmon`
 - ask which services you want to monitor
@@ -57,6 +60,8 @@ Current monitor templates in the bootstrap flow:
 - `Generic systemd service`
 
 The script also prints the final config directory and config file path after deployment.
+
+The bootstrap enables `rpi-procmon.service`, so the daemon starts automatically at boot through `systemd`.
 
 ## MA352 Template
 
@@ -93,6 +98,44 @@ The Scrypted example intentionally ships with a failing placeholder plugin resta
 sudo cp systemd/rpi-procmon.service /etc/systemd/system/rpi-procmon.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now rpi-procmon.service
+```
+
+## Logging
+
+`rpi-procmon` writes its own daemon log to the configured `PROC_LOG_FILE`, which defaults to `/var/log/rpi-procmon.log`. That file is append-only and contains procmon startup, status, and recovery events.
+
+Installed deployments also install a `logrotate` policy. The default retention policy is:
+- rotate daily
+- rotate when the log exceeds `10M`
+- keep `7` rotated files
+- compress old logs
+
+So the active log is capped by rotation and does not grow forever under the default deployment flow.
+
+The monitored services keep their own logs separately:
+- `Scrypted` logs still come from `docker logs scrypted`
+- `homebridge-mcintosh-rs232` bridge logs still come from its own service/app logging
+
+`rpi-procmon` reads those services through checks, but it does not replace or centralize their native logs.
+
+Because the daemon runs as a `systemd` service, you can also inspect service-level lifecycle output with:
+
+```bash
+journalctl -u rpi-procmon.service -f
+```
+
+## Uninstall
+
+Safe uninstall removes the procmon service, env file, and binary, but keeps config, logs, state, and the repo checkout:
+
+```bash
+sudo ./scripts/uninstall.sh
+```
+
+Purge uninstall also removes config, state, log files, and the default repo checkout under `/opt/rpi-procmon`:
+
+```bash
+sudo ./scripts/uninstall.sh --purge
 ```
 
 ## API
