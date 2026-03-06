@@ -68,7 +68,7 @@ All settings are environment variables loaded from `/etc/default/ma352-procmon` 
 ## What It Monitors
 
 - Health endpoint check (HTTP status + optional latency).
-- Health JSON fields `ok` and `serial_connected` (optional).
+- Health JSON fields `ok` and `serial_connected` (required when `PROC_REQUIRE_SERIAL=true`).
 - 1-minute load average (absolute or per-CPU threshold).
 - Memory usage percentage based on `/proc/meminfo`.
 - IO pressure `avg300` from `/proc/pressure/io`.
@@ -91,14 +91,14 @@ The implementation lives in `main.go` and follows a simple one-shot flow:
 3. Run the enabled checks for HTTP health, load, memory, I/O pressure, and path access.
 4. Aggregate any failures into a single reboot reason.
 5. Apply the minimum reboot interval guard.
-6. Write state and execute the reboot command if a reboot is required.
+6. Execute the reboot command and persist reboot state only after the command succeeds.
 
 For a code-oriented overview of the main functions and runtime behavior, see `ARCHITECTURE.md`.
 
 ## Logging and State
 
 - Logs: `/var/log/ma352-procmon.log` (append-only, UTC timestamps)
-- State: `/var/lib/ma352-procmon/state.json` (created only after a reboot-triggering event)
+- State: `/var/lib/ma352-procmon/state.json` (updated only after a successful reboot command handoff)
 
 ## Revision History
 

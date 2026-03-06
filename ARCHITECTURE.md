@@ -18,7 +18,8 @@
 5. If no checks fail, log success and exit.
 6. If checks fail, combine all failure reasons into a single message.
 7. Apply the reboot cooldown window using the last reboot timestamp from the state file.
-8. Persist the reboot attempt state and execute the configured reboot command.
+8. Execute the configured reboot command.
+9. Persist reboot state only after the reboot command succeeds.
 
 ## Main Components
 
@@ -26,7 +27,7 @@
   Reads all supported environment variables and applies defaults.
 
 - `checkHealth`
-  Sends an HTTP GET to `PROC_HEALTH_URL`, enforces timeout and optional latency, and optionally evaluates JSON fields such as `ok` and `serial_connected`.
+  Sends an HTTP GET to `PROC_HEALTH_URL`, enforces timeout and optional latency, and evaluates JSON fields such as `ok` and `serial_connected`. When `PROC_REQUIRE_SERIAL=true`, the response must be valid JSON and must include `serial_connected=true`.
 
 - `checkLoad`
   Reads `/proc/loadavg` and compares the 1-minute load average against either an absolute threshold or a per-CPU threshold.
@@ -46,9 +47,12 @@
 - `runReboot`
   Executes `PROC_REBOOT_CMD` through `sh -c`.
 
+- `triggerReboot`
+  Runs the reboot command and updates persisted state only after the command succeeds.
+
 ## Operational Notes
 
-- The tool is stateless unless it reaches a reboot-triggering path, in which case it updates the state file.
+- The tool is stateless unless it successfully hands off a reboot request, in which case it updates the state file.
 - Logs are append-only with UTC timestamps.
 - All checks are optional and controlled by environment variables, so the same binary can monitor different services or devices.
 - The shipped systemd timer runs the monitor once per minute after boot.

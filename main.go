@@ -117,15 +117,7 @@ func main() {
 		}
 	}
 
-	st.RebootCount++
-	st.LastRebootAt = time.Now().UTC().Format(time.RFC3339)
-	st.LastReason = reason
-	if err := writeState(cfg.stateFile, st); err != nil {
-		logf(logger, "state write failed: %v", err)
-	}
-
-	logf(logger, "REBOOTING: %s (count=%d)", reason, st.RebootCount)
-	if err := runReboot(cfg.rebootCmd); err != nil {
+	if err := triggerReboot(cfg, logger, st, reason); err != nil {
 		logf(logger, "reboot command failed: %v", err)
 		os.Exit(1)
 	}
@@ -291,19 +283,46 @@ func checkHealth(cfg config) (bool, string) {
 	}
 
 	var parsed healthResponse
-	if err := json.Unmarshal(body, &parsed); err == nil {
-		if parsed.Ok != nil && !*parsed.Ok {
-			if parsed.Error != "" {
-				return false, fmt.Sprintf("health not ok: %s", parsed.Error)
-			}
-			return false, "health not ok"
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		if cfg.requireSerial {
+			return false, fmt.Sprintf("health response invalid JSON: %v", err)
 		}
-		if cfg.requireSerial && parsed.SerialConnected != nil && !*parsed.SerialConnected {
+		return true, ""
+	}
+
+	if parsed.Ok != nil && !*parsed.Ok {
+		if parsed.Error != "" {
+			return false, fmt.Sprintf("health not ok: %s", parsed.Error)
+		}
+		return false, "health not ok"
+	}
+
+	if cfg.requireSerial {
+		if parsed.SerialConnected == nil {
+			return false, "health response missing serial_connected"
+		}
+		if !*parsed.SerialConnected {
 			return false, "serial disconnected"
 		}
 	}
 
 	return true, ""
+}
+
+func triggerReboot(cfg config, logger io.Writer, st state, reason string) error {
+	nextCount := st.RebootCount + 1
+	logf(logger, "REBOOTING: %s (count=%d)", reason, nextCount)
+	if err := runReboot(cfg.rebootCmd); err != nil {
+		return err
+	}
+
+	st.RebootCount = nextCount
+	st.LastRebootAt = time.Now().UTC().Format(time.RFC3339)
+	st.LastReason = reason
+	if err := writeState(cfg.stateFile, st); err != nil {
+		logf(logger, "state write failed: %v", err)
+	}
+	return nil
 }
 
 func checkLoad(cfg config) (bool, string) {
