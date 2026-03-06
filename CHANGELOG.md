@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- Add log rotation defaults via `logrotate`: daily rotation, `10M` max size, and `7` retained archives.
+- Add log rotation defaults via `logrotate`: rotate only above `5M`, keep `3` files, and do not compress.
 - Add a safe uninstall script plus optional `--purge` cleanup for config, state, logs, and the default repo checkout.
 - Add a one-line remote Raspberry Pi installer that bootstraps required packages, clones the repo, and launches the interactive deployment flow.
 

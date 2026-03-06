@@ -105,10 +105,9 @@ sudo systemctl enable --now rpi-procmon.service
 `rpi-procmon` writes its own daemon log to the configured `PROC_LOG_FILE`, which defaults to `/var/log/rpi-procmon.log`. That file is append-only and contains procmon startup, status, and recovery events.
 
 Installed deployments also install a `logrotate` policy. The default retention policy is:
-- rotate daily
-- rotate when the log exceeds `10M`
-- keep `7` rotated files
-- compress old logs
+- rotate only when the log exceeds `5M`
+- keep `3` rotated files
+- do not compress rotated logs
 
 So the active log is capped by rotation and does not grow forever under the default deployment flow.
 

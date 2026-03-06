@@ -1,11 +1,8 @@
 /var/log/rpi-procmon.log {
-  daily
-  rotate 7
-  maxsize 10M
+  rotate 3
+  maxsize 5M
   missingok
   notifempty
-  compress
-  delaycompress
   copytruncate
   create 0640 root root
 }
