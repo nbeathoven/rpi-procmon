@@ -82,6 +82,19 @@ To monitor an arbitrary service, point the health check at a service-specific he
 - If the service does not expose a health endpoint, run a small local health handler that checks `systemctl is-active your-service` and returns JSON `{ "ok": true }` when active.
 - If the service uses a device file or critical path, set `PROC_IO_PATHS` to that path and use `PROC_IO_ALLOW_PROCS` to ensure only expected processes have it open.
 
+## Code Walkthrough
+
+The implementation lives in `main.go` and follows a simple one-shot flow:
+
+1. Load environment-driven config.
+2. Open the log file and read the previous reboot state.
+3. Run the enabled checks for HTTP health, load, memory, I/O pressure, and path access.
+4. Aggregate any failures into a single reboot reason.
+5. Apply the minimum reboot interval guard.
+6. Write state and execute the reboot command if a reboot is required.
+
+For a code-oriented overview of the main functions and runtime behavior, see `ARCHITECTURE.md`.
+
 ## Logging and State
 
 - Logs: `/var/log/ma352-procmon.log` (append-only, UTC timestamps)
