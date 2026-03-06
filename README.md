@@ -1,105 +1,111 @@
 # rpi-procmon
 
-A lightweight, periodic proc/health monitor for Raspberry Pi. It runs as a systemd timer, checks system health and a health endpoint, and can reboot the device when configured thresholds are exceeded.
+`rpi-procmon` is a long-running Raspberry Pi monitoring daemon for multiple services. It executes named monitors on their own intervals, persists per-monitor state, runs ordered recovery actions, and exposes a local HTTP API for overall and per-service status.
 
-## Files and Locations
+## What It Does
 
-- App source: `main.go`
-- Systemd unit files: `systemd/ma352-procmon.service`, `systemd/ma352-procmon.timer`
-- Default config file (optional): `/etc/default/ma352-procmon`
-- Log file: `/var/log/ma352-procmon.log`
-- State file: `/var/lib/ma352-procmon/state.json`
+- Runs multiple monitors in one process.
+- Supports service-specific checks such as HTTP health, Docker container state, Docker log pattern matching, command checks, system load, memory, I/O pressure, and file path access.
+- Persists per-monitor runtime state including last check times, last failures, last recoveries, cooldowns, counters, and detailed check/action results.
+- Exposes API endpoints for external apps:
+  - `GET /health`
+  - `GET /status`
+  - `GET /monitors`
+  - `GET /monitors/{id}`
+- Supports a legacy MA352 mode when no JSON config file exists and the original `PROC_*` environment variables are set.
 
-## App Revision (Version Tracking)
+## Main Files
 
-The app exposes a build-time version string. By default it logs `version=dev` on each run. Set a real revision at build time:
+- `main.go`: monitor engine, checks, recovery actions, persistence, and API server.
+- `main_test.go`: coverage for config loading, recovery flow, and API exposure.
+- `configs/example.json`: example multi-monitor configuration for `ma352` and `scrypted-arlo`.
+- `systemd/rpi-procmon.service`: long-running systemd service.
+- `systemd/rpi-procmon.env.example`: environment file example.
+
+## Build
 
 ```bash
-go build -ldflags "-X main.appVersion=1.0.0" -o /usr/local/bin/ma352-procmon
+go build -ldflags "-X main.appVersion=$(git rev-parse --short HEAD)" -o /usr/local/bin/rpi-procmon
 ```
 
-You can use a Git-based revision string as well:
+## Configure
+
+1. Create config and env locations:
 
 ```bash
-go build -ldflags "-X main.appVersion=$(git rev-parse --short HEAD)" -o /usr/local/bin/ma352-procmon
+sudo mkdir -p /etc/rpi-procmon
+sudo cp configs/example.json /etc/rpi-procmon/config.json
+sudo cp systemd/rpi-procmon.env.example /etc/default/rpi-procmon
 ```
 
-The version is logged at startup in `/var/log/ma352-procmon.log`.
+2. Edit `/etc/rpi-procmon/config.json` for your monitors.
 
-## Quick Start
+The Scrypted example intentionally ships with a failing placeholder plugin restart command. Replace it with your real Arlo plugin restart command before enabling automated recovery.
 
-1. Build and install:
-
-```bash
-go build -ldflags "-X main.appVersion=1.0.0" -o /usr/local/bin/ma352-procmon
-```
-
-2. Install systemd units:
+## Install Service
 
 ```bash
-sudo cp systemd/ma352-procmon.service /etc/systemd/system/ma352-procmon.service
-sudo cp systemd/ma352-procmon.timer /etc/systemd/system/ma352-procmon.timer
+sudo cp systemd/rpi-procmon.service /etc/systemd/system/rpi-procmon.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now ma352-procmon.timer
+sudo systemctl enable --now rpi-procmon.service
 ```
 
-3. (Optional) configure `/etc/default/ma352-procmon`.
+## API
 
-## Configuration
+By default the API listens on `127.0.0.1:9645`.
 
-All settings are environment variables loaded from `/etc/default/ma352-procmon` (if present). Defaults are shown here:
+Examples:
 
-- `PROC_HEALTH_URL` = `http://127.0.0.1:5000/health`
-- `PROC_HEALTH_TIMEOUT_SEC` = `3`
-- `PROC_MAX_HEALTH_LATENCY_MS` = `0` (disabled)
-- `PROC_REQUIRE_SERIAL` = `false`
-- `PROC_REBOOT_ON_HEALTH_FAIL` = `true`
-- `PROC_MAX_LOAD1` = `0` (disabled)
-- `PROC_MAX_LOAD_PER_CPU` = `0` (disabled)
-- `PROC_MAX_MEM_USED_PCT` = `0` (disabled)
-- `PROC_MAX_IO_PRESSURE_AVG300` = `0` (disabled)
-- `PROC_IO_PATHS` = empty (disabled)
-- `PROC_IO_ALLOW_PROCS` = empty
-- `PROC_REBOOT_CMD` = `systemctl reboot`
-- `PROC_LOG_FILE` = `/var/log/ma352-procmon.log`
-- `PROC_STATE_FILE` = `/var/lib/ma352-procmon/state.json`
-- `PROC_MIN_REBOOT_INTERVAL_SEC` = `3600`
+```bash
+curl http://127.0.0.1:9645/health
+curl http://127.0.0.1:9645/status
+curl http://127.0.0.1:9645/monitors
+curl http://127.0.0.1:9645/monitors/scrypted-arlo
+```
 
-## What It Monitors
+## Monitor Model
 
-- Health endpoint check (HTTP status + optional latency).
-- Health JSON fields `ok` and `serial_connected` (required when `PROC_REQUIRE_SERIAL=true`).
-- 1-minute load average (absolute or per-CPU threshold).
-- Memory usage percentage based on `/proc/meminfo`.
-- IO pressure `avg300` from `/proc/pressure/io`.
-- Read/write access to specific paths, plus optional allowlist of processes that can keep those paths open.
+Each monitor defines:
+- `id`, `name`, `type`
+- `interval`
+- `failure_threshold`
+- `cooldown`
+- `checks[]`
+- `recovery[]`
 
-## Monitoring Any Given Service
+Checks currently supported:
+- `http_json`
+- `load`
+- `memory`
+- `io_pressure`
+- `io_paths`
+- `docker_container`
+- `docker_log_pattern`
+- `command`
 
-To monitor an arbitrary service, point the health check at a service-specific health endpoint or provide a tiny local health endpoint that validates the service. Examples:
+Recovery steps currently supported:
+- `command`
+- `sleep`
+- `recheck`
 
-- If the service exposes `http://127.0.0.1:PORT/health`, set `PROC_HEALTH_URL` to that endpoint.
-- If the service does not expose a health endpoint, run a small local health handler that checks `systemctl is-active your-service` and returns JSON `{ "ok": true }` when active.
-- If the service uses a device file or critical path, set `PROC_IO_PATHS` to that path and use `PROC_IO_ALLOW_PROCS` to ensure only expected processes have it open.
+## Per-Monitor State
 
-## Code Walkthrough
+The state file stores everything the daemon tracks for each monitor, including:
+- status
+- configured interval and cooldown
+- next check time
+- last check start/finish and duration
+- last success and failure timestamps
+- last recovery attempt, success, and failure timestamps
+- cooldown expiry
+- consecutive failures
+- run counters and recovery counters
+- last error and failure reasons
+- last check results with observations
+- last recovery action results with command output
 
-The implementation lives in `main.go` and follows a simple one-shot flow:
+## Test
 
-1. Load environment-driven config.
-2. Open the log file and read the previous reboot state.
-3. Run the enabled checks for HTTP health, load, memory, I/O pressure, and path access.
-4. Aggregate any failures into a single reboot reason.
-5. Apply the minimum reboot interval guard.
-6. Execute the reboot command and persist reboot state only after the command succeeds.
-
-For a code-oriented overview of the main functions and runtime behavior, see `ARCHITECTURE.md`.
-
-## Logging and State
-
-- Logs: `/var/log/ma352-procmon.log` (append-only, UTC timestamps)
-- State: `/var/lib/ma352-procmon/state.json` (updated only after a successful reboot command handoff)
-
-## Revision History
-
-See `CHANGELOG.md`.
+```bash
+go test ./...
+```

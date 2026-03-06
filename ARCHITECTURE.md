@@ -2,64 +2,78 @@
 
 ## Purpose
 
-`rpi-procmon` is a small Go daemon-style utility intended to run from a systemd timer on a Raspberry Pi. Each run performs a fixed set of health checks and can trigger a reboot when one or more configured thresholds are exceeded.
+`rpi-procmon` is a long-running Go daemon for Raspberry Pi. It monitors multiple named services in one process, runs service-specific recovery sequences, persists per-monitor runtime state, and exposes a local HTTP API for health and status.
 
 ## Runtime Flow
 
-1. Load configuration from environment variables.
-2. Open the configured log file and write a startup line with the build version.
-3. Read the persisted reboot state from disk.
-4. Run the enabled checks:
-   - HTTP health endpoint check
-   - 1-minute load average check
-   - memory usage check
-   - Linux PSI I/O pressure check
-   - read/write path access and optional open-process allowlist check
-5. If no checks fail, log success and exit.
-6. If checks fail, combine all failure reasons into a single message.
-7. Apply the reboot cooldown window using the last reboot timestamp from the state file.
-8. Execute the configured reboot command.
-9. Persist reboot state only after the reboot command succeeds.
+1. Load JSON config from `PROC_CONFIG_FILE`, or synthesize a legacy `ma352` monitor from the original `PROC_*` environment variables.
+2. Open the configured log file.
+3. Load the persisted procmon state file.
+4. Start the HTTP API server.
+5. Start one goroutine per enabled monitor.
+6. For each monitor cycle:
+   - mark the monitor as checking
+   - run all configured checks
+   - persist detailed check results
+   - if healthy, clear failure state
+   - if unhealthy and threshold/cooldown permit, execute the monitor's recovery steps
+   - persist recovery results and updated monitor state
 
-## Main Components
+## Monitor Model
 
-- `loadConfig`
-  Reads all supported environment variables and applies defaults.
+Each monitor has its own:
+- identity: `id`, `name`, `type`
+- schedule: `interval`
+- policy: `failure_threshold`, `cooldown`
+- `checks[]`
+- `recovery[]`
 
-- `checkHealth`
-  Sends an HTTP GET to `PROC_HEALTH_URL`, enforces timeout and optional latency, and evaluates JSON fields such as `ok` and `serial_connected`. When `PROC_REQUIRE_SERIAL=true`, the response must be valid JSON and must include `serial_connected=true`.
+This lets `ma352`, `scrypted-arlo`, `homebridge-core`, or future services each carry their own logic while sharing one engine.
 
-- `checkLoad`
-  Reads `/proc/loadavg` and compares the 1-minute load average against either an absolute threshold or a per-CPU threshold.
+## Current Check Types
 
-- `checkMem`
-  Reads `/proc/meminfo` and computes used memory percentage from `MemTotal` and `MemAvailable`.
+- `http_json`
+- `load`
+- `memory`
+- `io_pressure`
+- `io_paths`
+- `docker_container`
+- `docker_log_pattern`
+- `command`
 
-- `checkIOPressure`
-  Reads `/proc/pressure/io` and parses the `some avg300` PSI metric.
+## Current Recovery Step Types
 
-- `checkIO`
-  Confirms configured paths exist and are readable/writable, then optionally scans `/proc/*/fd` to identify processes holding those paths open.
+- `command`
+- `sleep`
+- `recheck`
 
-- `readState` / `writeState`
-  Manage the JSON file that tracks reboot count, last reboot time, and the last reboot reason.
+## State Model
 
-- `runReboot`
-  Executes `PROC_REBOOT_CMD` through `sh -c`.
+The state file is keyed by monitor id and stores the full runtime picture for each monitor:
+- current status
+- configured interval, cooldown, check count, recovery count
+- last and next check timestamps
+- last success and failure timestamps
+- last recovery attempt, success, and failure timestamps
+- cooldown expiration
+- consecutive failure streak
+- cumulative run, failure, and recovery counters
+- last error and failure reasons
+- last check results with observations
+- last recovery action results with command output
 
-- `triggerReboot`
-  Runs the reboot command and updates persisted state only after the command succeeds.
+## API
 
-## Operational Notes
-
-- The tool is stateless unless it successfully hands off a reboot request, in which case it updates the state file.
-- Logs are append-only with UTC timestamps.
-- All checks are optional and controlled by environment variables, so the same binary can monitor different services or devices.
-- The shipped systemd timer runs the monitor once per minute after boot.
+The embedded HTTP API provides:
+- `/health`: procmon liveness and overall status
+- `/status`: global snapshot and all monitor states
+- `/monitors`: list of all monitor states
+- `/monitors/{id}`: one monitor's full state
 
 ## Files
 
-- `main.go`: application entry point and all monitor logic
-- `systemd/ma352-procmon.service`: one-shot systemd service unit
-- `systemd/ma352-procmon.timer`: periodic timer unit
-- `README.md`: installation, configuration, and operations guide
+- `main.go`: daemon entrypoint plus engine, checks, actions, persistence, and API
+- `main_test.go`: core tests
+- `configs/example.json`: example multi-monitor config
+- `systemd/rpi-procmon.service`: long-running systemd service
+- `systemd/rpi-procmon.env.example`: runtime environment example

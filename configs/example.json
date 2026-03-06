@@ -1,0 +1,106 @@
+{
+  "log_file": "/var/log/rpi-procmon.log",
+  "state_file": "/var/lib/rpi-procmon/state.json",
+  "api": {
+    "listen_address": "127.0.0.1:9645",
+    "read_header_timeout": "5s"
+  },
+  "monitors": [
+    {
+      "id": "ma352",
+      "name": "MA352",
+      "type": "ma352",
+      "interval": "1m",
+      "failure_threshold": 1,
+      "cooldown": "1h",
+      "metadata": {
+        "site": "lab"
+      },
+      "checks": [
+        {
+          "id": "ma352-health",
+          "type": "http_json",
+          "url": "http://127.0.0.1:5000/health",
+          "timeout": "3s",
+          "require_ok": true,
+          "require_serial_connected": true
+        },
+        {
+          "id": "ma352-load",
+          "type": "load",
+          "max_load_per_cpu": 1.5
+        },
+        {
+          "id": "ma352-memory",
+          "type": "memory",
+          "max_mem_used_pct": 90
+        }
+      ],
+      "recovery": [
+        {
+          "name": "reboot-host",
+          "type": "command",
+          "command": "systemctl reboot"
+        }
+      ]
+    },
+    {
+      "id": "scrypted-arlo",
+      "name": "Scrypted Arlo",
+      "type": "docker-log",
+      "interval": "5m",
+      "failure_threshold": 1,
+      "cooldown": "20m",
+      "checks": [
+        {
+          "id": "scrypted-running",
+          "type": "docker_container",
+          "container": "scrypted"
+        },
+        {
+          "id": "arlo-log-errors",
+          "type": "docker_log_pattern",
+          "container": "scrypted",
+          "since": "10m",
+          "match_count_threshold": 4,
+          "patterns": [
+            "Arlo Cloud snapshot failed: Failed to get snapshot URL",
+            "MQTT Event Stream .* failed to connect with return code 4",
+            "MQTT Event Stream .* disconnected with return code 5",
+            "HTTP error 401 .*fullFrameSnapshot"
+          ]
+        }
+      ],
+      "recovery": [
+        {
+          "name": "restart-arlo-plugin",
+          "type": "command",
+          "command": "docker exec scrypted /bin/sh -lc 'echo set your plugin restart command here && exit 1'"
+        },
+        {
+          "name": "wait-after-plugin-restart",
+          "type": "sleep",
+          "duration": "30s"
+        },
+        {
+          "name": "recheck-after-plugin-restart",
+          "type": "recheck"
+        },
+        {
+          "name": "restart-scrypted-container",
+          "type": "command",
+          "command": "docker restart scrypted"
+        },
+        {
+          "name": "wait-after-container-restart",
+          "type": "sleep",
+          "duration": "60s"
+        },
+        {
+          "name": "recheck-after-container-restart",
+          "type": "recheck"
+        }
+      ]
+    }
+  ]
+}

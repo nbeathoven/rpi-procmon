@@ -1,115 +1,220 @@
 package main
 
 import (
-	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+	"time"
 )
 
-func TestCheckHealthRequireSerialFailsOnInvalidJSON(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("not-json"))
-	}))
-	defer server.Close()
+type fakeRunner struct {
+	responses map[string][]CommandOutcome
+	errors    map[string][]error
+	counts    map[string]int
+}
 
-	ok, reason := checkHealth(config{
-		healthURL:        server.URL,
-		healthTimeoutSec: 1,
-		requireSerial:    true,
-	})
-
-	if ok {
-		t.Fatal("expected health check to fail")
+func (f *fakeRunner) Run(_ context.Context, command string) (CommandOutcome, error) {
+	if f.counts == nil {
+		f.counts = make(map[string]int)
 	}
-	if !strings.Contains(reason, "invalid JSON") {
-		t.Fatalf("expected invalid JSON reason, got %q", reason)
+	index := f.counts[command]
+	f.counts[command] = index + 1
+
+	outcomes := f.responses[command]
+	var outcome CommandOutcome
+	if index < len(outcomes) {
+		outcome = outcomes[index]
+	} else if len(outcomes) > 0 {
+		outcome = outcomes[len(outcomes)-1]
+	}
+
+	errs := f.errors[command]
+	var err error
+	if index < len(errs) {
+		err = errs[index]
+	} else if len(errs) > 0 {
+		err = errs[len(errs)-1]
+	}
+	return outcome, err
+}
+
+func TestLoadConfigFromFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.json")
+	if err := os.WriteFile(cfgPath, []byte(`{
+  "api": {"listen_address":"127.0.0.1:9900"},
+  "monitors": [{
+    "id":"scrypted-arlo",
+    "type":"docker-log",
+    "interval":"5m",
+    "failure_threshold":2,
+    "cooldown":"15m",
+    "checks":[{"type":"docker_log_pattern","container":"scrypted","patterns":["Arlo"],"match_count_threshold":4}],
+    "recovery":[{"type":"command","command":"docker restart scrypted"}]
+  }]
+}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PROC_CONFIG_FILE", cfgPath)
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig failed: %v", err)
+	}
+	if cfg.API.ListenAddress != "127.0.0.1:9900" {
+		t.Fatalf("unexpected listen address %q", cfg.API.ListenAddress)
+	}
+	if len(cfg.Monitors) != 1 || cfg.Monitors[0].ID != "scrypted-arlo" {
+		t.Fatalf("unexpected monitors %#v", cfg.Monitors)
 	}
 }
 
-func TestCheckHealthRequireSerialFailsOnMissingField(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	}))
-	defer server.Close()
-
-	ok, reason := checkHealth(config{
-		healthURL:        server.URL,
-		healthTimeoutSec: 1,
-		requireSerial:    true,
-	})
-
-	if ok {
-		t.Fatal("expected health check to fail")
+func TestLegacyConfigFallback(t *testing.T) {
+	t.Setenv("PROC_CONFIG_FILE", filepath.Join(t.TempDir(), "missing.json"))
+	t.Setenv("PROC_HEALTH_URL", "http://127.0.0.1:5000/health")
+	t.Setenv("PROC_REBOOT_ON_HEALTH_FAIL", "true")
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig failed: %v", err)
 	}
-	if reason != "health response missing serial_connected" {
-		t.Fatalf("unexpected reason %q", reason)
+	if len(cfg.Monitors) != 1 {
+		t.Fatalf("expected one legacy monitor, got %d", len(cfg.Monitors))
+	}
+	if cfg.Monitors[0].ID != "ma352" {
+		t.Fatalf("unexpected legacy monitor id %q", cfg.Monitors[0].ID)
 	}
 }
 
-func TestCheckHealthRequireSerialPassesWhenConnected(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"ok":true,"serial_connected":true}`))
-	}))
-	defer server.Close()
+func TestRecoveryFlowUpdatesPerMonitorState(t *testing.T) {
+	tmpDir := t.TempDir()
+	runner := &fakeRunner{
+		responses: map[string][]CommandOutcome{
+			"check-service": {
+				{Output: "failed", ExitCode: 1},
+				{Output: "healthy", ExitCode: 0},
+			},
+			"restart-service": {
+				{Output: "restarted", ExitCode: 0},
+			},
+		},
+		errors: map[string][]error{
+			"check-service":   {errors.New("boom"), nil},
+			"restart-service": {nil},
+		},
+	}
 
-	ok, reason := checkHealth(config{
-		healthURL:        server.URL,
-		healthTimeoutSec: 1,
-		requireSerial:    true,
-	})
+	cfg := Config{
+		ConfigFile: filepath.Join(tmpDir, "config.json"),
+		LogFile:    filepath.Join(tmpDir, "procmon.log"),
+		StateFile:  filepath.Join(tmpDir, "state.json"),
+		API: APIConfig{
+			ListenAddress: "127.0.0.1:9645",
+		},
+		Monitors: []MonitorConfig{{
+			ID:               "svc",
+			Name:             "svc",
+			Type:             "command",
+			Interval:         "1m",
+			FailureThreshold: 1,
+			Cooldown:         "1m",
+			Checks: []CheckConfig{{
+				ID:      "check",
+				Name:    "check",
+				Type:    "command",
+				Command: "check-service",
+			}},
+			Recovery: []ActionConfig{{
+				Name:    "restart",
+				Type:    "command",
+				Command: "restart-service",
+			}, {
+				Name: "recheck",
+				Type: "recheck",
+			}},
+		}},
+	}
 
+	logger, closeLog, err := openLog(cfg.LogFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeLog()
+
+	manager, err := newManager(cfg, logger, runner)
+	if err != nil {
+		t.Fatalf("newManager failed: %v", err)
+	}
+
+	manager.runMonitorCycle(context.Background(), cfg.Monitors[0], time.Minute)
+	monitor, ok := manager.MonitorSnapshot("svc")
 	if !ok {
-		t.Fatalf("expected health check to pass, got %q", reason)
+		t.Fatal("monitor state missing")
+	}
+	if monitor.Status != "healthy" {
+		t.Fatalf("expected recovered healthy status, got %q", monitor.Status)
+	}
+	if monitor.RecoveryCount != 1 {
+		t.Fatalf("expected one recovery, got %d", monitor.RecoveryCount)
+	}
+	if len(monitor.LastRecoveryResults) != 2 {
+		t.Fatalf("expected two recovery steps, got %d", len(monitor.LastRecoveryResults))
 	}
 }
 
-func TestTriggerRebootDoesNotWriteStateOnFailure(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "state.json")
-	var logs bytes.Buffer
-
-	err := triggerReboot(config{
-		rebootCmd: "false",
-		stateFile: statePath,
-	}, &logs, state{}, "health check failed")
-	if err == nil {
-		t.Fatal("expected reboot to fail")
+func TestStatusAPIExposesMonitorState(t *testing.T) {
+	enabled := true
+	manager := &manager{
+		cfg: Config{
+			ConfigFile: "/tmp/config.json",
+			LogFile:    "/tmp/procmon.log",
+			StateFile:  "/tmp/state.json",
+			API: APIConfig{
+				ListenAddress: "127.0.0.1:9645",
+			},
+			Monitors: []MonitorConfig{{
+				ID:               "ma352",
+				Name:             "MA352",
+				Type:             "ma352",
+				Enabled:          &enabled,
+				Interval:         "1m",
+				FailureThreshold: 1,
+				Cooldown:         "1m",
+			}},
+		},
+		startedAt: time.Now().UTC(),
+		state: ProcmonState{
+			StartedAt: time.Now().UTC().Format(time.RFC3339),
+			Monitors: map[string]*MonitorRuntimeState{
+				"ma352": {
+					ID:      "ma352",
+					Name:    "MA352",
+					Type:    "ma352",
+					Enabled: true,
+					Status:  "healthy",
+				},
+			},
+		},
 	}
 
-	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
-		t.Fatalf("expected no state file to be written, got err=%v", err)
-	}
-}
+	server := httptest.NewServer(newAPIServer(manager.cfg, manager).Handler)
+	defer server.Close()
 
-func TestTriggerRebootWritesStateOnSuccess(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "state.json")
-	var logs bytes.Buffer
-
-	err := triggerReboot(config{
-		rebootCmd: "true",
-		stateFile: statePath,
-	}, &logs, state{RebootCount: 2}, "load high")
+	resp, err := http.Get(server.URL + "/monitors/ma352")
 	if err != nil {
-		t.Fatalf("expected reboot command to succeed, got %v", err)
+		t.Fatal(err)
 	}
+	defer resp.Body.Close()
 
-	st, err := readState(statePath)
-	if err != nil {
-		t.Fatalf("expected state to be written, got %v", err)
+	var state MonitorRuntimeState
+	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
+		t.Fatal(err)
 	}
-	if st.RebootCount != 3 {
-		t.Fatalf("expected reboot count 3, got %d", st.RebootCount)
-	}
-	if st.LastReason != "load high" {
-		t.Fatalf("expected last reason to be persisted, got %q", st.LastReason)
-	}
-	if st.LastRebootAt == "" {
-		t.Fatal("expected last reboot time to be set")
+	if state.ID != "ma352" || state.Status != "healthy" {
+		t.Fatalf("unexpected monitor state %#v", state)
 	}
 }

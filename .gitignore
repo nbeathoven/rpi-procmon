@@ -10,3 +10,6 @@
 /rpi-procmon-health-tool-app
 /rpi-procmon
 /ma352-procmon
+
+# macOS metadata
+.DS_Store
