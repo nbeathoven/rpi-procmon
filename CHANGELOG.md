@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Add a one-line remote Raspberry Pi installer that bootstraps required packages, clones the repo, and launches the interactive deployment flow.
+
 ## [0.2.0] - 2026-03-06
 
 - Refactor the app from a one-shot timer-driven MA352 monitor into a long-running multi-monitor `rpi-procmon` daemon.

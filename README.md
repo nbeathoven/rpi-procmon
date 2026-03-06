@@ -20,12 +20,24 @@
 - `main_test.go`: coverage for config loading, recovery flow, and API exposure.
 - `configs/example.json`: example multi-monitor configuration for `ma352` and `scrypted-arlo`.
 - `scripts/bootstrap-rpi.sh`: first-time Raspberry Pi deployment helper.
+- `scripts/install.sh`: one-line remote installer for fresh Raspberry Pi hosts.
 - `systemd/rpi-procmon.service`: long-running systemd service.
 - `systemd/rpi-procmon.env.example`: environment file example.
 
 ## Fresh Raspberry Pi Deployment
 
-For a first install on a fresh Raspberry Pi, run the interactive bootstrap script:
+For a turnkey first install on a fresh Raspberry Pi, run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nbeathoven/rpi-procmon/main/scripts/install.sh | sudo bash
+```
+
+That remote installer will:
+- install required base packages such as `git`, `curl`, `python3`, and `tar`
+- clone or update `rpi-procmon` under `/opt/rpi-procmon`
+- launch the interactive bootstrap flow from the local checkout
+
+If you already have the repo cloned locally, you can run the interactive bootstrap script directly:
 
 ```bash
 sudo ./scripts/bootstrap-rpi.sh
