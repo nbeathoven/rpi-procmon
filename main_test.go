@@ -74,6 +74,59 @@ func TestLoadConfigFromFile(t *testing.T) {
 	}
 }
 
+func TestLoadConfigDeduplicatesMonitorIDs(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.json")
+	if err := os.WriteFile(cfgPath, []byte(`{
+  "api": {"listen_address":"127.0.0.1:9900"},
+  "monitors": [
+    {
+      "id":"scrypted-arlo",
+      "type":"docker-log",
+      "interval":"5m",
+      "checks":[{"type":"docker_container","container":"old-scrypted"}],
+      "recovery":[{"type":"command","command":"docker restart old-scrypted"}]
+    },
+    {
+      "id":"scrypted-arlo",
+      "type":"docker-log",
+      "interval":"10m",
+      "checks":[{"type":"docker_container","container":"scrypted"}],
+      "recovery":[{"type":"command","command":"docker restart scrypted"}]
+    }
+  ]
+}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PROC_CONFIG_FILE", cfgPath)
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig failed: %v", err)
+	}
+	if len(cfg.Monitors) != 1 {
+		t.Fatalf("expected one deduplicated monitor, got %d", len(cfg.Monitors))
+	}
+	if cfg.Monitors[0].Interval != "10m" {
+		t.Fatalf("expected last duplicate definition to win, got interval %q", cfg.Monitors[0].Interval)
+	}
+	if len(cfg.Monitors[0].Checks) != 1 || cfg.Monitors[0].Checks[0].Container != "scrypted" {
+		t.Fatalf("unexpected checks after dedupe: %#v", cfg.Monitors[0].Checks)
+	}
+
+	rewritten, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted Config
+	if err := json.Unmarshal(rewritten, &persisted); err != nil {
+		t.Fatalf("rewritten config is invalid JSON: %v", err)
+	}
+	if len(persisted.Monitors) != 1 {
+		t.Fatalf("expected rewritten config to contain one monitor, got %d", len(persisted.Monitors))
+	}
+}
+
 func TestLegacyConfigFallback(t *testing.T) {
 	t.Setenv("PROC_CONFIG_FILE", filepath.Join(t.TempDir(), "missing.json"))
 	t.Setenv("PROC_HEALTH_URL", "http://127.0.0.1:5000/health")
@@ -164,6 +217,12 @@ func TestRecoveryFlowUpdatesPerMonitorState(t *testing.T) {
 	if len(monitor.LastRecoveryResults) != 2 {
 		t.Fatalf("expected two recovery steps, got %d", len(monitor.LastRecoveryResults))
 	}
+	if len(monitor.ConfiguredChecks) != 1 {
+		t.Fatalf("expected configured checks to be persisted, got %#v", monitor.ConfiguredChecks)
+	}
+	if len(monitor.ConfiguredRecoveries) != 2 {
+		t.Fatalf("expected configured recoveries to be persisted, got %#v", monitor.ConfiguredRecoveries)
+	}
 }
 
 func TestStatusAPIExposesMonitorState(t *testing.T) {
@@ -184,6 +243,16 @@ func TestStatusAPIExposesMonitorState(t *testing.T) {
 				Interval:         "1m",
 				FailureThreshold: 1,
 				Cooldown:         "1m",
+				Checks: []CheckConfig{{
+					ID:   "health",
+					Type: "http_json",
+					URL:  "http://127.0.0.1:5000/health",
+				}},
+				Recovery: []ActionConfig{{
+					Name:    "restart",
+					Type:    "command",
+					Command: "systemctl restart ma352-bridge",
+				}},
 			}},
 		},
 		startedAt: time.Now().UTC(),
@@ -191,11 +260,13 @@ func TestStatusAPIExposesMonitorState(t *testing.T) {
 			StartedAt: time.Now().UTC().Format(time.RFC3339),
 			Monitors: map[string]*MonitorRuntimeState{
 				"ma352": {
-					ID:      "ma352",
-					Name:    "MA352",
-					Type:    "ma352",
-					Enabled: true,
-					Status:  "healthy",
+					ID:                   "ma352",
+					Name:                 "MA352",
+					Type:                 "ma352",
+					Enabled:              true,
+					Status:               "healthy",
+					ConfiguredChecks:     StoredCheckConfigs{{ID: "health", Type: "http_json", URL: "http://127.0.0.1:5000/health"}},
+					ConfiguredRecoveries: StoredActions{{Name: "restart", Type: "command", Command: "systemctl restart ma352-bridge"}},
 				},
 			},
 		},
@@ -216,5 +287,101 @@ func TestStatusAPIExposesMonitorState(t *testing.T) {
 	}
 	if state.ID != "ma352" || state.Status != "healthy" {
 		t.Fatalf("unexpected monitor state %#v", state)
+	}
+	if len(state.ConfiguredChecks) != 1 || state.ConfiguredChecks[0].ID != "health" {
+		t.Fatalf("expected configured checks in API response, got %#v", state.ConfiguredChecks)
+	}
+	if len(state.ConfiguredRecoveries) != 1 || state.ConfiguredRecoveries[0].Name != "restart" {
+		t.Fatalf("expected configured recoveries in API response, got %#v", state.ConfiguredRecoveries)
+	}
+}
+
+func TestHealthAPIReportsServiceUnavailableWhenProcmonIsFailed(t *testing.T) {
+	manager := &manager{
+		cfg: Config{
+			API: APIConfig{
+				ListenAddress: "127.0.0.1:9645",
+			},
+			Monitors: []MonitorConfig{{
+				ID:       "svc",
+				Name:     "svc",
+				Type:     "command",
+				Interval: "1m",
+				Cooldown: "1m",
+			}},
+		},
+		startedAt: time.Now().UTC(),
+		state: ProcmonState{
+			StartedAt: time.Now().UTC().Format(time.RFC3339),
+			Monitors: map[string]*MonitorRuntimeState{
+				"svc": {
+					ID:      "svc",
+					Name:    "svc",
+					Type:    "command",
+					Enabled: true,
+					Status:  "failed",
+				},
+			},
+		},
+	}
+
+	server := httptest.NewServer(newAPIServer(manager.cfg, manager).Handler)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected /health status 503, got %d", resp.StatusCode)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := body["ok"].(bool); ok {
+		t.Fatalf("expected health response ok=false, got %#v", body)
+	}
+	if alive, _ := body["alive"].(bool); !alive {
+		t.Fatalf("expected health response alive=true, got %#v", body)
+	}
+}
+
+func TestReadProcmonStateAcceptsLegacyConfiguredCountFields(t *testing.T) {
+	tmpDir := t.TempDir()
+	statePath := filepath.Join(tmpDir, "state.json")
+	if err := os.WriteFile(statePath, []byte(`{
+  "version": 2,
+  "monitors": {
+    "svc": {
+      "id": "svc",
+      "name": "svc",
+      "type": "command",
+      "enabled": true,
+      "status": "healthy",
+      "configured_checks": 1,
+      "configured_recoveries": 2
+    }
+  }
+}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := readProcmonState(statePath)
+	if err != nil {
+		t.Fatalf("readProcmonState failed: %v", err)
+	}
+	monitor := state.Monitors["svc"]
+	if monitor == nil {
+		t.Fatal("expected monitor state to be loaded")
+	}
+	if len(monitor.ConfiguredChecks) != 0 {
+		t.Fatalf("expected legacy configured_checks count to be accepted without retained entries, got %#v", monitor.ConfiguredChecks)
+	}
+	if len(monitor.ConfiguredRecoveries) != 0 {
+		t.Fatalf("expected legacy configured_recoveries count to be accepted without retained entries, got %#v", monitor.ConfiguredRecoveries)
 	}
 }

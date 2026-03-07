@@ -7,8 +7,12 @@ All notable changes to this project will be documented in this file.
 - Fix bootstrap post-install status parsing so procmon API JSON is read correctly and no traceback is printed on successful installs.
 - Bootstrap now reuses an existing compatible Go toolchain and only installs Go when it is missing or too old for the repo `go.mod` requirement.
 - Bootstrap reruns now preserve unrelated monitors, replace monitors with the same id, and clean duplicate existing monitor entries during config generation.
+- Bootstrap also replaces conflicting systemd-service monitors when they target the same underlying service name, so reruns can safely update `ma352`, `homebridge`, and other service monitors without duplicating coverage.
 - Bootstrap now blocks duplicate monitor ids before enabling the service and reports `systemctl` state cleanly during startup.
 - Bootstrap deployment now prints a post-install summary with the assigned IP, service enable/active state, and procmon API/monitor status.
+- Runtime state and API responses now expose full configured checks and recovery steps for each monitor, while remaining compatible with older state files that stored only counts.
+- `/health` now reports actual procmon health instead of always returning `ok=true`, and returns HTTP `503` when procmon is degraded, failed, or unknown.
+- Procmon now logs per-monitor check and recovery activity to its own log file in addition to startup/shutdown events.
 - Add log rotation defaults via `logrotate`: rotate only above `5M`, keep `3` files, and do not compress.
 - Add a safe uninstall script plus optional `--purge` cleanup for config, state, logs, and the default repo checkout.
 - Add a one-line remote Raspberry Pi installer that bootstraps required packages, clones the repo, and launches the interactive deployment flow.

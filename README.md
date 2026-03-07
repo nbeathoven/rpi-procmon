@@ -64,6 +64,8 @@ The script also prints the final config directory and config file path after dep
 
 If you rerun bootstrap on a host that already has `/etc/rpi-procmon/config.json`, the installer preserves unrelated monitors and replaces any monitor with the same id that you selected again. Existing duplicate monitor entries are cleaned automatically during config generation.
 
+For systemd-backed monitors, bootstrap also treats the monitored service name as a replacement key. If an existing monitor already targets `homebridge`, `ma352-bridge`, or another systemd service you select again, the new definition replaces the old one instead of creating duplicate coverage for the same service.
+
 The bootstrap enables `rpi-procmon.service`, so the daemon starts automatically at boot through `systemd`.
 
 ## MA352 Template
@@ -105,7 +107,7 @@ sudo systemctl enable --now rpi-procmon.service
 
 ## Logging
 
-`rpi-procmon` writes its own daemon log to the configured `PROC_LOG_FILE`, which defaults to `/var/log/rpi-procmon.log`. That file is append-only and contains procmon startup, status, and recovery events.
+`rpi-procmon` writes its own daemon log to the configured `PROC_LOG_FILE`, which defaults to `/var/log/rpi-procmon.log`. That file is append-only and contains procmon startup, per-monitor check outcomes, and recovery events.
 
 Installed deployments also install a `logrotate` policy. The default retention policy is:
 - rotate only when the log exceeds `5M`
@@ -143,6 +145,8 @@ sudo ./scripts/uninstall.sh --purge
 ## API
 
 By default the API listens on `127.0.0.1:9645`.
+
+`GET /health` reports process liveness and overall procmon health. It returns HTTP `200` while the daemon is healthy or actively recovering and HTTP `503` when overall procmon status is degraded, failed, or unknown.
 
 Examples:
 
@@ -183,6 +187,7 @@ Recovery steps currently supported:
 The state file stores everything the daemon tracks for each monitor, including:
 - status
 - configured interval and cooldown
+- configured checks and configured recovery steps
 - next check time
 - last check start/finish and duration
 - last success and failure timestamps

@@ -101,8 +101,8 @@ type MonitorRuntimeState struct {
 	FailureThreshold      int               `json:"failure_threshold"`
 	Cooldown              string            `json:"cooldown"`
 	Metadata              map[string]string `json:"metadata,omitempty"`
-	ConfiguredChecks      int               `json:"configured_checks"`
-	ConfiguredRecoveries  int               `json:"configured_recoveries"`
+	ConfiguredChecks      StoredCheckConfigs `json:"configured_checks"`
+	ConfiguredRecoveries  StoredActions      `json:"configured_recoveries"`
 	LastCheckStartedAt    string            `json:"last_check_started_at,omitempty"`
 	LastCheckFinishedAt   string            `json:"last_check_finished_at,omitempty"`
 	LastCheckDurationMS   int64             `json:"last_check_duration_ms,omitempty"`
@@ -146,6 +146,56 @@ type ActionResult struct {
 	StartedAt  string `json:"started_at"`
 	FinishedAt string `json:"finished_at"`
 	DurationMS int64  `json:"duration_ms"`
+}
+
+// StoredCheckConfigs remains compatible with older state files that stored only a count.
+type StoredCheckConfigs []CheckConfig
+
+func (s *StoredCheckConfigs) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		*s = nil
+		return nil
+	}
+	if trimmed[0] == '[' {
+		var checks []CheckConfig
+		if err := json.Unmarshal(trimmed, &checks); err != nil {
+			return err
+		}
+		*s = checks
+		return nil
+	}
+	var ignored int
+	if err := json.Unmarshal(trimmed, &ignored); err != nil {
+		return err
+	}
+	*s = nil
+	return nil
+}
+
+// StoredActions remains compatible with older state files that stored only a count.
+type StoredActions []ActionConfig
+
+func (s *StoredActions) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		*s = nil
+		return nil
+	}
+	if trimmed[0] == '[' {
+		var actions []ActionConfig
+		if err := json.Unmarshal(trimmed, &actions); err != nil {
+			return err
+		}
+		*s = actions
+		return nil
+	}
+	var ignored int
+	if err := json.Unmarshal(trimmed, &ignored); err != nil {
+		return err
+	}
+	*s = nil
+	return nil
 }
 
 type ProcmonStatus struct {
@@ -281,6 +331,17 @@ func loadConfig() (Config, error) {
 		if err := json.Unmarshal(data, &fileCfg); err != nil {
 			return Config{}, fmt.Errorf("parse %s: %w", cfgFile, err)
 		}
+		dedupedMonitors, duplicateIDs, err := dedupeMonitorConfigs(fileCfg.Monitors)
+		if err != nil {
+			return Config{}, fmt.Errorf("sanitize %s: %w", cfgFile, err)
+		}
+		if len(duplicateIDs) > 0 {
+			fileCfg.Monitors = dedupedMonitors
+			fmt.Fprintf(os.Stderr, "rpi-procmon: cleaned duplicate monitor ids in %s: %s\n", cfgFile, strings.Join(duplicateIDs, ", "))
+			if err := rewriteConfigFile(cfgFile, fileCfg); err != nil {
+				return Config{}, fmt.Errorf("rewrite deduplicated %s: %w", cfgFile, err)
+			}
+		}
 		if strings.TrimSpace(fileCfg.LogFile) != "" {
 			cfg.LogFile = fileCfg.LogFile
 		}
@@ -293,7 +354,7 @@ func loadConfig() (Config, error) {
 		if strings.TrimSpace(fileCfg.API.ReadHeaderTimeout) != "" {
 			cfg.API.ReadHeaderTimeout = fileCfg.API.ReadHeaderTimeout
 		}
-		cfg.Monitors = fileCfg.Monitors
+		cfg.Monitors = dedupedMonitors
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return Config{}, fmt.Errorf("read %s: %w", cfgFile, err)
 	}
@@ -311,7 +372,6 @@ func loadConfig() (Config, error) {
 }
 
 func normalizeConfig(cfg *Config) error {
-	seen := make(map[string]struct{})
 	if strings.TrimSpace(cfg.API.ListenAddress) == "" {
 		cfg.API.ListenAddress = "127.0.0.1:9645"
 	}
@@ -324,10 +384,6 @@ func normalizeConfig(cfg *Config) error {
 		if mon.ID == "" {
 			return errors.New("monitor id is required")
 		}
-		if _, ok := seen[mon.ID]; ok {
-			return fmt.Errorf("duplicate monitor id %q", mon.ID)
-		}
-		seen[mon.ID] = struct{}{}
 		if strings.TrimSpace(mon.Name) == "" {
 			mon.Name = mon.ID
 		}
@@ -358,6 +414,49 @@ func normalizeConfig(cfg *Config) error {
 		}
 	}
 	return nil
+}
+
+func dedupeMonitorConfigs(monitors []MonitorConfig) ([]MonitorConfig, []string, error) {
+	if len(monitors) == 0 {
+		return nil, nil, nil
+	}
+
+	deduped := make([]MonitorConfig, 0, len(monitors))
+	indexByID := make(map[string]int, len(monitors))
+	duplicateIDs := make([]string, 0)
+	duplicateSeen := make(map[string]struct{})
+
+	for _, monitor := range monitors {
+		monitor.ID = strings.TrimSpace(monitor.ID)
+		if monitor.ID == "" {
+			return nil, nil, errors.New("monitor id is required")
+		}
+		if index, ok := indexByID[monitor.ID]; ok {
+			deduped[index] = monitor
+			if _, seen := duplicateSeen[monitor.ID]; !seen {
+				duplicateSeen[monitor.ID] = struct{}{}
+				duplicateIDs = append(duplicateIDs, monitor.ID)
+			}
+			continue
+		}
+		indexByID[monitor.ID] = len(deduped)
+		deduped = append(deduped, monitor)
+	}
+
+	return deduped, duplicateIDs, nil
+}
+
+func rewriteConfigFile(path string, cfg Config) error {
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func legacyMonitorsFromEnv() []MonitorConfig {
@@ -509,12 +608,13 @@ func (m *manager) runMonitorCycle(ctx context.Context, monitor MonitorConfig, in
 
 	results, reasons := m.evaluateMonitor(ctx, monitor)
 	finished := time.Now().UTC()
+	durationMS := finished.Sub(start).Milliseconds()
 
 	m.mu.Lock()
 	st = m.ensureMonitorStateLocked(monitor)
 	st.CheckRunCount++
 	st.LastCheckFinishedAt = finished.Format(time.RFC3339)
-	st.LastCheckDurationMS = finished.Sub(start).Milliseconds()
+	st.LastCheckDurationMS = durationMS
 	st.LastCheckResults = cloneCheckResults(results)
 
 	if len(reasons) == 0 {
@@ -526,6 +626,7 @@ func (m *manager) runMonitorCycle(ctx context.Context, monitor MonitorConfig, in
 		st.LastFailureReasons = nil
 		m.persistOrLogLocked()
 		m.mu.Unlock()
+		logf(m.logger, "monitor check ok: id=%s type=%s duration_ms=%d checks=%d", monitor.ID, monitor.Type, durationMS, len(results))
 		return
 	}
 
@@ -536,8 +637,10 @@ func (m *manager) runMonitorCycle(ctx context.Context, monitor MonitorConfig, in
 	st.LastError = joinReasons(reasons)
 	st.LastFailureReasons = append([]string(nil), reasons...)
 	shouldRecover := st.ConsecutiveFailures >= monitor.FailureThreshold && !cooldownActive(st.CooldownUntil, finished)
+	consecutiveFailures := st.ConsecutiveFailures
 	m.persistOrLogLocked()
 	m.mu.Unlock()
+	logf(m.logger, "monitor check failed: id=%s type=%s duration_ms=%d consecutive_failures=%d threshold=%d will_recover=%t reasons=%s", monitor.ID, monitor.Type, durationMS, consecutiveFailures, monitor.FailureThreshold, shouldRecover, joinReasons(reasons))
 
 	if !shouldRecover {
 		return
@@ -576,6 +679,15 @@ func (m *manager) runMonitorCycle(ctx context.Context, monitor MonitorConfig, in
 	}
 	m.persistOrLogLocked()
 	m.mu.Unlock()
+	if recovered {
+		logf(m.logger, "monitor recovery succeeded: id=%s actions=%d", monitor.ID, len(actionResults))
+		return
+	}
+	if len(postReasons) > 0 {
+		logf(m.logger, "monitor recovery failed: id=%s actions=%d reasons=%s", monitor.ID, len(actionResults), joinReasons(postReasons))
+		return
+	}
+	logf(m.logger, "monitor recovery failed: id=%s actions=%d", monitor.ID, len(actionResults))
 }
 
 func (m *manager) evaluateMonitor(ctx context.Context, monitor MonitorConfig) ([]CheckResult, []string) {
@@ -599,10 +711,12 @@ func (m *manager) executeRecovery(ctx context.Context, monitor MonitorConfig) ([
 	st.Status = "recovering"
 	m.persistOrLogLocked()
 	m.mu.Unlock()
+	logf(m.logger, "monitor recovery start: id=%s actions=%d", monitor.ID, len(monitor.Recovery))
 
 	for _, action := range monitor.Recovery {
 		actionResult := runAction(ctx, m.runner, action)
 		results = append(results, actionResult)
+		logf(m.logger, "monitor recovery action: id=%s action=%s type=%s success=%t message=%s", monitor.ID, actionResult.Name, actionResult.Type, actionResult.Success, actionResult.Message)
 		if action.Type == "recheck" {
 			checkResults, reasons := m.evaluateMonitor(ctx, monitor)
 			if len(reasons) == 0 {
@@ -699,8 +813,8 @@ func (m *manager) ensureMonitorStateLocked(mon MonitorConfig) *MonitorRuntimeSta
 		st.FailureThreshold = mon.FailureThreshold
 		st.Cooldown = mon.Cooldown
 		st.Metadata = cloneStringMap(mon.Metadata)
-		st.ConfiguredChecks = len(mon.Checks)
-		st.ConfiguredRecoveries = len(mon.Recovery)
+		st.ConfiguredChecks = cloneStoredCheckConfigs(mon.Checks)
+		st.ConfiguredRecoveries = cloneStoredActions(mon.Recovery)
 		return st
 	}
 
@@ -714,8 +828,8 @@ func (m *manager) ensureMonitorStateLocked(mon MonitorConfig) *MonitorRuntimeSta
 		FailureThreshold:     mon.FailureThreshold,
 		Cooldown:             mon.Cooldown,
 		Metadata:             cloneStringMap(mon.Metadata),
-		ConfiguredChecks:     len(mon.Checks),
-		ConfiguredRecoveries: len(mon.Recovery),
+		ConfiguredChecks:     cloneStoredCheckConfigs(mon.Checks),
+		ConfiguredRecoveries: cloneStoredActions(mon.Recovery),
 	}
 	m.state.Monitors[mon.ID] = st
 	return st
@@ -738,8 +852,14 @@ func newAPIServer(cfg Config, manager *manager) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		snapshot := manager.Snapshot()
-		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":             true,
+		ok := overallStatusHealthy(snapshot.OverallStatus)
+		statusCode := http.StatusOK
+		if !ok {
+			statusCode = http.StatusServiceUnavailable
+		}
+		writeJSON(w, statusCode, map[string]any{
+			"alive":          true,
+			"ok":             ok,
 			"overall_status": snapshot.OverallStatus,
 			"app_version":    snapshot.AppVersion,
 			"uptime_seconds": snapshot.UptimeSeconds,
@@ -1185,6 +1305,15 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
+func overallStatusHealthy(status string) bool {
+	switch status {
+	case "healthy", "recovering":
+		return true
+	default:
+		return false
+	}
+}
+
 func logf(w io.Writer, format string, args ...interface{}) {
 	ts := time.Now().UTC().Format(time.RFC3339)
 	msg := fmt.Sprintf(format, args...)
@@ -1322,6 +1451,24 @@ func cloneActionResults(in []ActionResult) []ActionResult {
 	return out
 }
 
+func cloneStoredCheckConfigs(in []CheckConfig) StoredCheckConfigs {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]CheckConfig, len(in))
+	copy(out, in)
+	return StoredCheckConfigs(out)
+}
+
+func cloneStoredActions(in []ActionConfig) StoredActions {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ActionConfig, len(in))
+	copy(out, in)
+	return StoredActions(out)
+}
+
 func cloneMonitorState(in *MonitorRuntimeState) *MonitorRuntimeState {
 	if in == nil {
 		return nil
@@ -1331,6 +1478,8 @@ func cloneMonitorState(in *MonitorRuntimeState) *MonitorRuntimeState {
 	out.LastFailureReasons = append([]string(nil), in.LastFailureReasons...)
 	out.LastCheckResults = cloneCheckResults(in.LastCheckResults)
 	out.LastRecoveryResults = cloneActionResults(in.LastRecoveryResults)
+	out.ConfiguredChecks = cloneStoredCheckConfigs([]CheckConfig(in.ConfiguredChecks))
+	out.ConfiguredRecoveries = cloneStoredActions([]ActionConfig(in.ConfiguredRecoveries))
 	return &out
 }
 

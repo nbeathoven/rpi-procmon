@@ -97,6 +97,32 @@ import os
 import sys
 from pathlib import Path
 
+def normalize(value):
+    return str(value or "").strip().lower()
+
+def monitor_target_keys(monitor):
+    keys = []
+    metadata = monitor.get("metadata") or {}
+    service_name = normalize(metadata.get("service_name"))
+    if not service_name:
+        for check in monitor.get("checks", []) or []:
+            if normalize(check.get("type")) != "command":
+                continue
+            command = normalize(check.get("command"))
+            prefix = "systemctl is-active --quiet "
+            if command.startswith(prefix):
+                service_name = command[len(prefix):].strip()
+                break
+    if service_name:
+        keys.append(f"systemd-service:{service_name}")
+    return keys
+
+def describe_target(key):
+    kind, _, value = key.partition(":")
+    if kind == "systemd-service":
+        return f"systemd service {value}"
+    return key
+
 def upsert(monitor):
     path = Path(sys.argv[1])
     monitors = []
@@ -107,20 +133,32 @@ def upsert(monitor):
                 continue
             monitors.append(json.loads(line))
 
-    monitor_id = monitor.get("id", "")
-    replaced = False
-    if monitor_id:
-        next_monitors = []
-        for existing in monitors:
-            if existing.get("id", "") == monitor_id:
-                replaced = True
-                continue
-            next_monitors.append(existing)
-        monitors = next_monitors
+    monitor_id = str(monitor.get("id", "")).strip()
+    target_keys = set(monitor_target_keys(monitor))
+    replaced_by_id = False
+    replaced_targets = []
+    next_monitors = []
+    for existing in monitors:
+        existing_id = str(existing.get("id", "")).strip()
+        if monitor_id and existing_id == monitor_id:
+            replaced_by_id = True
+            continue
+        overlap = sorted(target_keys & set(monitor_target_keys(existing)))
+        if overlap:
+            replaced_targets.append((existing_id, overlap))
+            continue
+        next_monitors.append(existing)
+    monitors = next_monitors
     monitors.append(monitor)
     path.write_text("".join(json.dumps(item) + "\n" for item in monitors), encoding="utf-8")
-    if replaced and monitor_id:
+    if replaced_by_id and monitor_id:
         print(f"Replacing pending monitor definition for id: {monitor_id}", file=sys.stderr)
+    for existing_id, overlaps in replaced_targets:
+        for key in overlaps:
+            if existing_id:
+                print(f"Replacing pending monitor definition for {describe_target(key)} (previous id: {existing_id})", file=sys.stderr)
+            else:
+                print(f"Replacing pending monitor definition for {describe_target(key)}", file=sys.stderr)
 
 template = os.environ["PROC_TEMPLATE"]
 if template == "ma352":
@@ -301,20 +339,65 @@ api_addr = sys.argv[3]
 log_file = sys.argv[4]
 state_file = sys.argv[5]
 
-def add_or_replace(monitor, ordered_ids, monitor_by_id, announce_replace=False):
-    monitor_id = monitor.get("id")
+def normalize(value):
+    return str(value or "").strip().lower()
+
+def monitor_target_keys(monitor):
+    keys = []
+    metadata = monitor.get("metadata") or {}
+    service_name = normalize(metadata.get("service_name"))
+    if not service_name:
+        for check in monitor.get("checks", []) or []:
+            if normalize(check.get("type")) != "command":
+                continue
+            command = normalize(check.get("command"))
+            prefix = "systemctl is-active --quiet "
+            if command.startswith(prefix):
+                service_name = command[len(prefix):].strip()
+                break
+    if service_name:
+        keys.append(f"systemd-service:{service_name}")
+    return keys
+
+def describe_target(key):
+    kind, _, value = key.partition(":")
+    if kind == "systemd-service":
+        return f"systemd service {value}"
+    return key
+
+def remove_monitor(monitor_id, ordered_ids, monitor_by_id, target_key_to_id):
+    ordered_ids[:] = [existing_id for existing_id in ordered_ids if existing_id != monitor_id]
+    monitor_by_id.pop(monitor_id, None)
+    for target_key, existing_id in list(target_key_to_id.items()):
+        if existing_id == monitor_id:
+            del target_key_to_id[target_key]
+
+def add_or_replace(monitor, ordered_ids, monitor_by_id, target_key_to_id, announce_replace=False):
+    monitor_id = str(monitor.get("id") or "").strip()
     if not monitor_id:
         raise SystemExit("Monitor id is required in generated config")
-    if monitor_id not in ordered_ids:
-        ordered_ids.append(monitor_id)
-    elif announce_replace:
-        print(f"Replacing existing monitor definition for id: {monitor_id}", file=sys.stderr)
-    monitor_by_id[monitor_id] = monitor
+    target_keys = monitor_target_keys(monitor)
 
+    if monitor_id in monitor_by_id:
+        if announce_replace:
+            print(f"Replacing existing monitor definition for id: {monitor_id}", file=sys.stderr)
+    else:
+        ordered_ids.append(monitor_id)
+
+    for target_key in target_keys:
+        existing_id = target_key_to_id.get(target_key)
+        if existing_id and existing_id != monitor_id:
+            remove_monitor(existing_id, ordered_ids, monitor_by_id, target_key_to_id)
+            print(f"Replacing existing monitor definition for {describe_target(target_key)} (previous id: {existing_id})", file=sys.stderr)
+    monitor_by_id[monitor_id] = monitor
+    for target_key in target_keys:
+        target_key_to_id[target_key] = monitor_id
+
+existing_config = {}
 existing_monitors = []
 if config_path.exists():
-    existing = json.loads(config_path.read_text(encoding="utf-8"))
-    existing_monitors = existing.get("monitors", []) or []
+    existing_config = json.loads(config_path.read_text(encoding="utf-8"))
+    existing_monitors = existing_config.get("monitors", []) or []
 
 selected_monitors = []
 if monitors_path.exists():
@@ -326,30 +409,30 @@ if monitors_path.exists():
 
 ordered_ids = []
 monitor_by_id = {}
+target_key_to_id = {}
 seen_existing = set()
 for monitor in existing_monitors:
-    monitor_id = monitor.get("id")
+    monitor_id = str(monitor.get("id") or "").strip()
     if not monitor_id:
         raise SystemExit("Monitor id is required in existing config")
     if monitor_id in seen_existing:
         print(f"Cleaning duplicate existing monitor definition for id: {monitor_id}", file=sys.stderr)
     seen_existing.add(monitor_id)
-    add_or_replace(monitor, ordered_ids, monitor_by_id)
+    add_or_replace(monitor, ordered_ids, monitor_by_id, target_key_to_id)
 
 for monitor in selected_monitors:
-    add_or_replace(monitor, ordered_ids, monitor_by_id, announce_replace=monitor.get("id") in monitor_by_id)
+    add_or_replace(monitor, ordered_ids, monitor_by_id, target_key_to_id, announce_replace=str(monitor.get("id") or "").strip() in monitor_by_id)
 
 monitors = [monitor_by_id[monitor_id] for monitor_id in ordered_ids]
 
-config = {
-    "log_file": log_file,
-    "state_file": state_file,
-    "api": {
-        "listen_address": api_addr,
-        "read_header_timeout": "5s",
-    },
-    "monitors": monitors,
+config = dict(existing_config)
+config["log_file"] = log_file
+config["state_file"] = state_file
+config["api"] = {
+    "listen_address": api_addr,
+    "read_header_timeout": "5s",
 }
+config["monitors"] = monitors
 
 config_path.parent.mkdir(parents=True, exist_ok=True)
 config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
@@ -585,9 +668,9 @@ add_scrypted_arlo_monitor() {
 
 add_systemd_service_monitor() {
   local monitor_id monitor_name service_name health_url interval cooldown
-  monitor_id="$(prompt_required "Custom monitor id")"
-  monitor_name="$(prompt_default "Custom monitor name" "$monitor_id")"
   service_name="$(prompt_required "Systemd service name to monitor")"
+  monitor_id="$(prompt_default "Custom monitor id" "$service_name")"
+  monitor_name="$(prompt_default "Custom monitor name" "$monitor_id")"
   health_url="$(prompt_default "Optional health URL (leave blank for none)" "")"
   interval="$(prompt_default "Custom service check interval" "1m")"
   cooldown="$(prompt_default "Custom service recovery cooldown" "10m")"
