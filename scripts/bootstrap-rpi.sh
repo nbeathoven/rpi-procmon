@@ -118,6 +118,23 @@ if isinstance(value, str) and value.strip():
 PY
 }
 
+detect_ipv4_addresses() {
+  if command -v ip >/dev/null 2>&1; then
+    ip -4 -o addr show up scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | awk '!seen[$0]++ && $0 != ""'
+    return
+  fi
+
+  hostname -I 2>/dev/null | tr ' ' '\n' | awk '/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && !seen[$0]++'
+}
+
+first_line() {
+  local value="$1"
+  if [[ -z "$value" ]]; then
+    return 1
+  fi
+  printf '%s\n' "$value" | head -n 1
+}
+
 append_monitor_json() {
   python3 - "$TMP_MONITORS" <<'PY'
 import json
@@ -827,6 +844,7 @@ main() {
 
   local config_dir config_file env_file service_file bin_path api_addr log_file state_file
   local api_addr_default log_file_default state_file_default
+  local detected_ipv4s detected_primary_ipv4
   config_dir="$(prompt_default "rpi-procmon config directory" "$DEFAULT_CONFIG_DIR")"
   config_file="$config_dir/config.json"
   if [[ -f "$config_file" ]]; then
@@ -838,6 +856,15 @@ main() {
   api_addr_default="$(read_json_string "$config_file" "api.listen_address")"
   log_file_default="$(read_json_string "$config_file" "log_file")"
   state_file_default="$(read_json_string "$config_file" "state_file")"
+  detected_ipv4s="$(detect_ipv4_addresses || true)"
+  detected_primary_ipv4="$(first_line "$detected_ipv4s" || true)"
+  if [[ -n "$detected_ipv4s" ]]; then
+    echo "Detected IPv4 addresses:"
+    printf '%s\n' "$detected_ipv4s" | sed 's/^/  - /'
+  fi
+  if [[ -z "$api_addr_default" && -n "$detected_primary_ipv4" ]]; then
+    api_addr_default="${detected_primary_ipv4}:9645"
+  fi
   api_addr="$(prompt_default "Procmon API listen address" "${api_addr_default:-$DEFAULT_API_ADDR}")"
   log_file="$(prompt_default "Procmon log file" "${log_file_default:-$DEFAULT_LOG_FILE}")"
   state_file="$(prompt_default "Procmon state file" "${state_file_default:-$DEFAULT_STATE_FILE}")"
