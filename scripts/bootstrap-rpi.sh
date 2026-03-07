@@ -441,13 +441,34 @@ add_ma352_monitor() {
 }
 
 add_scrypted_arlo_monitor() {
-  local container_name interval cooldown log_since match_threshold plugin_restart_cmd
+  local container_name interval cooldown log_since match_threshold plugin_restart_cmd recovery_target
+  echo
+  echo "Scrypted Arlo monitor setup:"
+  echo "  - Log scan window: how far back procmon scans Scrypted logs, for example 10m or 1h."
+  echo "  - Failure threshold: how many matching Arlo error lines inside that window trigger recovery."
+  echo "  - Primary recovery target: default is plugin restart first."
+  echo "    Type scrypted if you want container restart to be the first recovery action instead."
   container_name="$(prompt_default "Scrypted container name" "scrypted")"
   interval="$(prompt_default "Scrypted Arlo check interval" "5m")"
   cooldown="$(prompt_default "Scrypted Arlo recovery cooldown" "20m")"
-  log_since="$(prompt_default "Scrypted Arlo log window" "10m")"
-  match_threshold="$(prompt_default "Scrypted Arlo log match threshold" "4")"
-  plugin_restart_cmd="$(prompt_default "Arlo plugin restart command (blank means container-only recovery)" "")"
+  log_since="$(prompt_default "Scrypted Arlo log scan window (duration like 10m or 1h)" "10m")"
+  match_threshold="$(prompt_default "Scrypted Arlo matching error lines required before recovery" "4")"
+  recovery_target="$(prompt_default "Primary recovery target (plugin or scrypted)" "plugin")"
+  recovery_target="$(printf '%s' "$recovery_target" | tr '[:upper:]' '[:lower:]')"
+
+  plugin_restart_cmd=""
+  if [[ "$recovery_target" != "scrypted" ]]; then
+    while true; do
+      plugin_restart_cmd="$(prompt_default "Arlo plugin restart command (or type scrypted to restart the whole container instead)" "")"
+      if [[ -n "$plugin_restart_cmd" ]]; then
+        if [[ "$(printf '%s' "$plugin_restart_cmd" | tr '[:upper:]' '[:lower:]')" == "scrypted" ]]; then
+          plugin_restart_cmd=""
+        fi
+        break
+      fi
+      echo "Plugin-first recovery needs a plugin restart command. Type scrypted if you want container restart instead."
+    done
+  fi
 
   export PROC_TEMPLATE="scrypted_arlo"
   export PROC_CONTAINER_NAME="$container_name"
