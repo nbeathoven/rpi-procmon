@@ -99,6 +99,17 @@ from pathlib import Path
 
 def append(monitor):
     path = Path(sys.argv[1])
+    existing_ids = set()
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            existing = json.loads(line)
+            existing_ids.add(existing.get("id", ""))
+    monitor_id = monitor.get("id", "")
+    if monitor_id and monitor_id in existing_ids:
+        raise SystemExit(f"Duplicate monitor id selected during bootstrap: {monitor_id}")
     with path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(monitor))
         fh.write("\n")
@@ -283,12 +294,18 @@ log_file = sys.argv[4]
 state_file = sys.argv[5]
 
 monitors = []
+monitor_ids = set()
 if monitors_path.exists():
     for line in monitors_path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
-        monitors.append(json.loads(line))
+        monitor = json.loads(line)
+        monitor_id = monitor.get("id")
+        if monitor_id in monitor_ids:
+            raise SystemExit(f"Duplicate monitor id in generated config: {monitor_id}")
+        monitor_ids.add(monitor_id)
+        monitors.append(monitor)
 
 config = {
     "log_file": log_file,
@@ -499,14 +516,28 @@ add_systemd_service_monitor() {
   append_monitor_json
 }
 
+systemctl_state() {
+  local state_type="$1"
+  local service_name="$2"
+  local state_output
+
+  state_output="$(systemctl "$state_type" "$service_name" 2>/dev/null || true)"
+  state_output="$(printf '%s' "$state_output" | head -n 1 | tr -d '\r')"
+  if [[ -z "$state_output" ]]; then
+    printf '%s\n' "unknown"
+    return
+  fi
+  printf '%s\n' "$state_output"
+}
+
 show_post_install_status() {
   local service_name="$1"
   local api_addr="$2"
   local primary_ip enabled_state active_state status_json
 
   primary_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  enabled_state="$(systemctl is-enabled "$service_name" 2>/dev/null || printf 'unknown')"
-  active_state="$(systemctl is-active "$service_name" 2>/dev/null || printf 'unknown')"
+  enabled_state="$(systemctl_state is-enabled "$service_name")"
+  active_state="$(systemctl_state is-active "$service_name")"
 
   echo
   echo "Install OK"

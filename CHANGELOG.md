@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Bootstrap now blocks duplicate monitor ids before enabling the service and reports `systemctl` state cleanly during startup.
 - Bootstrap deployment now prints a post-install summary with the assigned IP, service enable/active state, and procmon API/monitor status.
 - Add log rotation defaults via `logrotate`: rotate only above `5M`, keep `3` files, and do not compress.
 - Add a safe uninstall script plus optional `--purge` cleanup for config, state, logs, and the default repo checkout.
