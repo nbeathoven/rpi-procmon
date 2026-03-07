@@ -385,10 +385,69 @@ map_go_arch() {
   esac
 }
 
+resolve_go_versions() {
+  local minimum_version preferred_version
+  minimum_version="$(awk '/^go / { print "go" $2; exit }' "$REPO_DIR/go.mod")"
+  preferred_version="$(awk '/^toolchain / { print $2; exit }' "$REPO_DIR/go.mod")"
+  if [[ -z "$minimum_version" ]]; then
+    echo "Unable to determine minimum Go version from go.mod" >&2
+    exit 1
+  fi
+  if [[ -z "$preferred_version" ]]; then
+    preferred_version="$minimum_version"
+  fi
+  printf '%s %s\n' "$minimum_version" "$preferred_version"
+}
+
+normalize_go_version() {
+  local version="$1"
+  version="${version#go}"
+  IFS='.' read -r major minor patch <<< "$version"
+  major="${major:-0}"
+  minor="${minor:-0}"
+  patch="${patch:-0}"
+  printf '%d %d %d\n' "$major" "$minor" "$patch"
+}
+
+version_gte() {
+  local left="$1"
+  local right="$2"
+  local l_major l_minor l_patch r_major r_minor r_patch
+  read -r l_major l_minor l_patch <<< "$(normalize_go_version "$left")"
+  read -r r_major r_minor r_patch <<< "$(normalize_go_version "$right")"
+
+  if (( l_major > r_major )); then
+    return 0
+  fi
+  if (( l_major < r_major )); then
+    return 1
+  fi
+  if (( l_minor > r_minor )); then
+    return 0
+  fi
+  if (( l_minor < r_minor )); then
+    return 1
+  fi
+  if (( l_patch >= r_patch )); then
+    return 0
+  fi
+  return 1
+}
+
 ensure_go() {
+  local minimum_version preferred_version
+  read -r minimum_version preferred_version <<< "$(resolve_go_versions)"
+
   if command -v go >/dev/null 2>&1; then
-    GO_BIN="$(command -v go)"
-    return
+    local installed_go installed_version
+    installed_go="$(command -v go)"
+    installed_version="$(go version | awk '{print $3}')"
+    if version_gte "$installed_version" "$minimum_version"; then
+      GO_BIN="$installed_go"
+      echo "Using existing Go ${installed_version} from ${installed_go}. Minimum required is ${minimum_version}; preferred toolchain is ${preferred_version}."
+      return
+    fi
+    echo "Installed Go ${installed_version} is older than required ${minimum_version}. Installing ${preferred_version}."
   fi
 
   if ! command -v curl >/dev/null 2>&1; then
@@ -400,19 +459,12 @@ ensure_go() {
     exit 1
   fi
 
-  local toolchain_version
-  toolchain_version="$(awk '/^toolchain / { print $2; exit } /^go / { print "go" $2; exit }' "$REPO_DIR/go.mod")"
-  if [[ -z "$toolchain_version" ]]; then
-    echo "Unable to determine Go toolchain version from go.mod"
-    exit 1
-  fi
-
   local go_arch archive_url archive_path
   go_arch="$(map_go_arch)"
-  archive_url="https://go.dev/dl/${toolchain_version}.linux-${go_arch}.tar.gz"
-  archive_path="/tmp/${toolchain_version}.linux-${go_arch}.tar.gz"
+  archive_url="https://go.dev/dl/${preferred_version}.linux-${go_arch}.tar.gz"
+  archive_path="/tmp/${preferred_version}.linux-${go_arch}.tar.gz"
 
-  echo "Installing Go ${toolchain_version} for ${go_arch}..."
+  echo "Installing Go ${preferred_version} for ${go_arch}..."
   curl -fsSL "$archive_url" -o "$archive_path"
   if [[ -d /usr/local/go ]]; then
     mv /usr/local/go "/usr/local/go.backup.$(date +%s)"

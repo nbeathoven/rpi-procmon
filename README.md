@@ -47,7 +47,7 @@ sudo ./scripts/bootstrap-rpi.sh
 
 The script will:
 - install `logrotate` if it is missing
-- install Go if it is missing
+- install Go only if it is missing or older than the minimum version required by `go.mod`; otherwise reuse the existing compatible toolchain
 - build `rpi-procmon`
 - ask which services you want to monitor
 - generate `/etc/rpi-procmon/config.json`
