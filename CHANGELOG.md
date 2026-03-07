@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Bootstrap reruns now preserve unrelated monitors, replace monitors with the same id, and clean duplicate existing monitor entries during config generation.
 - Bootstrap now blocks duplicate monitor ids before enabling the service and reports `systemctl` state cleanly during startup.
 - Bootstrap deployment now prints a post-install summary with the assigned IP, service enable/active state, and procmon API/monitor status.
 - Add log rotation defaults via `logrotate`: rotate only above `5M`, keep `3` files, and do not compress.

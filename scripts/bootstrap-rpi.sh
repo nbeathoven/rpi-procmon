@@ -97,22 +97,30 @@ import os
 import sys
 from pathlib import Path
 
-def append(monitor):
+def upsert(monitor):
     path = Path(sys.argv[1])
-    existing_ids = set()
+    monitors = []
     if path.exists():
         for line in path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line:
                 continue
-            existing = json.loads(line)
-            existing_ids.add(existing.get("id", ""))
+            monitors.append(json.loads(line))
+
     monitor_id = monitor.get("id", "")
-    if monitor_id and monitor_id in existing_ids:
-        raise SystemExit(f"Duplicate monitor id selected during bootstrap: {monitor_id}")
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(monitor))
-        fh.write("\n")
+    replaced = False
+    if monitor_id:
+        next_monitors = []
+        for existing in monitors:
+            if existing.get("id", "") == monitor_id:
+                replaced = True
+                continue
+            next_monitors.append(existing)
+        monitors = next_monitors
+    monitors.append(monitor)
+    path.write_text("".join(json.dumps(item) + "\n" for item in monitors), encoding="utf-8")
+    if replaced and monitor_id:
+        print(f"Replacing pending monitor definition for id: {monitor_id}", file=sys.stderr)
 
 template = os.environ["PROC_TEMPLATE"]
 if template == "ma352":
@@ -159,7 +167,7 @@ if template == "ma352":
             },
         ],
     }
-    append(monitor)
+    upsert(monitor)
 elif template == "scrypted_arlo":
     recovery = []
     plugin_cmd = os.environ.get("PROC_PLUGIN_RESTART_CMD", "").strip()
@@ -225,7 +233,7 @@ elif template == "scrypted_arlo":
         ],
         "recovery": recovery,
     }
-    append(monitor)
+    upsert(monitor)
 elif template == "systemd_service":
     checks = [
         {
@@ -271,7 +279,7 @@ elif template == "systemd_service":
             },
         ],
     }
-    append(monitor)
+    upsert(monitor)
 else:
     raise SystemExit(f"Unsupported template: {template}")
 PY
@@ -293,19 +301,45 @@ api_addr = sys.argv[3]
 log_file = sys.argv[4]
 state_file = sys.argv[5]
 
-monitors = []
-monitor_ids = set()
+def add_or_replace(monitor, ordered_ids, monitor_by_id, announce_replace=False):
+    monitor_id = monitor.get("id")
+    if not monitor_id:
+        raise SystemExit("Monitor id is required in generated config")
+    if monitor_id not in ordered_ids:
+        ordered_ids.append(monitor_id)
+    elif announce_replace:
+        print(f"Replacing existing monitor definition for id: {monitor_id}", file=sys.stderr)
+    monitor_by_id[monitor_id] = monitor
+
+existing_monitors = []
+if config_path.exists():
+    existing = json.loads(config_path.read_text(encoding="utf-8"))
+    existing_monitors = existing.get("monitors", []) or []
+
+selected_monitors = []
 if monitors_path.exists():
     for line in monitors_path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
-        monitor = json.loads(line)
-        monitor_id = monitor.get("id")
-        if monitor_id in monitor_ids:
-            raise SystemExit(f"Duplicate monitor id in generated config: {monitor_id}")
-        monitor_ids.add(monitor_id)
-        monitors.append(monitor)
+        selected_monitors.append(json.loads(line))
+
+ordered_ids = []
+monitor_by_id = {}
+seen_existing = set()
+for monitor in existing_monitors:
+    monitor_id = monitor.get("id")
+    if not monitor_id:
+        raise SystemExit("Monitor id is required in existing config")
+    if monitor_id in seen_existing:
+        print(f"Cleaning duplicate existing monitor definition for id: {monitor_id}", file=sys.stderr)
+    seen_existing.add(monitor_id)
+    add_or_replace(monitor, ordered_ids, monitor_by_id)
+
+for monitor in selected_monitors:
+    add_or_replace(monitor, ordered_ids, monitor_by_id, announce_replace=monitor.get("id") in monitor_by_id)
+
+monitors = [monitor_by_id[monitor_id] for monitor_id in ordered_ids]
 
 config = {
     "log_file": log_file,
@@ -603,6 +637,9 @@ main() {
   local config_dir config_file env_file service_file bin_path api_addr log_file state_file
   config_dir="$(prompt_default "rpi-procmon config directory" "$DEFAULT_CONFIG_DIR")"
   config_file="$config_dir/config.json"
+  if [[ -f "$config_file" ]]; then
+    echo "Existing config detected at $config_file. Matching monitor ids will be replaced; other monitors will be preserved."
+  fi
   env_file="$(prompt_default "Environment file path" "$DEFAULT_ENV_FILE")"
   service_file="$(prompt_default "systemd service path" "$DEFAULT_SERVICE_FILE")"
   bin_path="$(prompt_default "Binary install path" "$DEFAULT_BIN_PATH")"

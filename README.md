@@ -62,6 +62,8 @@ Current monitor templates in the bootstrap flow:
 
 The script also prints the final config directory and config file path after deployment.
 
+If you rerun bootstrap on a host that already has `/etc/rpi-procmon/config.json`, the installer preserves unrelated monitors and replaces any monitor with the same id that you selected again. Existing duplicate monitor entries are cleaned automatically during config generation.
+
 The bootstrap enables `rpi-procmon.service`, so the daemon starts automatically at boot through `systemd`.
 
 ## MA352 Template
