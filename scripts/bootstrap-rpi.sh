@@ -639,18 +639,24 @@ show_post_install_status() {
   done
 
   if [[ -n "${status_json:-}" ]]; then
-    echo "Procmon API status check: PASS"
-    printf '%s' "$status_json" | python3 - <<'PY_STATUS'
+    if PROC_STATUS_JSON="$status_json" python3 - <<'PY_STATUS'
 import json
-import sys
+import os
 
-payload = json.load(sys.stdin)
+payload = json.loads(os.environ["PROC_STATUS_JSON"])
+print("Procmon API status check: PASS")
 print(f"Overall status: {payload.get('overall_status', 'unknown')}")
 for monitor in payload.get('monitors', []):
     monitor_id = monitor.get('id', 'unknown')
     status = monitor.get('status', 'unknown')
     print(f"  - {monitor_id}: {status}")
 PY_STATUS
+    then
+      :
+    else
+      echo "Procmon API status check: FAIL"
+      echo "  Procmon API responded, but bootstrap could not parse the JSON payload."
+    fi
   else
     echo "Procmon API status check: FAIL"
     echo "  Unable to reach http://$api_addr/status yet."

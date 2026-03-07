@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fix bootstrap post-install status parsing so procmon API JSON is read correctly and no traceback is printed on successful installs.
 - Bootstrap now reuses an existing compatible Go toolchain and only installs Go when it is missing or too old for the repo `go.mod` requirement.
 - Bootstrap reruns now preserve unrelated monitors, replace monitors with the same id, and clean duplicate existing monitor entries during config generation.
 - Bootstrap now blocks duplicate monitor ids before enabling the service and reports `systemctl` state cleanly during startup.
