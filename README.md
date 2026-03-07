@@ -53,6 +53,7 @@ The script will:
 - generate `/etc/rpi-procmon/config.json`
 - install `/etc/default/rpi-procmon`
 - install and start `rpi-procmon.service`
+- print a post-install summary with the assigned IP, service enable/active state, and procmon API status
 
 Current monitor templates in the bootstrap flow:
 - `MA352 bridge`

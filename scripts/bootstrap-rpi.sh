@@ -499,6 +499,47 @@ add_systemd_service_monitor() {
   append_monitor_json
 }
 
+show_post_install_status() {
+  local service_name="$1"
+  local api_addr="$2"
+  local primary_ip enabled_state active_state status_json
+
+  primary_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  enabled_state="$(systemctl is-enabled "$service_name" 2>/dev/null || printf 'unknown')"
+  active_state="$(systemctl is-active "$service_name" 2>/dev/null || printf 'unknown')"
+
+  echo
+  echo "Install OK"
+  echo "Assigned IP: ${primary_ip:-unknown}"
+  echo "Service enabled: $enabled_state"
+  echo "Service active: $active_state"
+
+  for _ in 1 2 3 4 5; do
+    if status_json="$(curl -fsS --max-time 5 "http://$api_addr/status" 2>/dev/null)"; then
+      break
+    fi
+    sleep 1
+  done
+
+  if [[ -n "${status_json:-}" ]]; then
+    echo "Procmon API status check: PASS"
+    printf '%s' "$status_json" | python3 - <<'PY_STATUS'
+import json
+import sys
+
+payload = json.load(sys.stdin)
+print(f"Overall status: {payload.get('overall_status', 'unknown')}")
+for monitor in payload.get('monitors', []):
+    monitor_id = monitor.get('id', 'unknown')
+    status = monitor.get('status', 'unknown')
+    print(f"  - {monitor_id}: {status}")
+PY_STATUS
+  else
+    echo "Procmon API status check: FAIL"
+    echo "  Unable to reach http://$api_addr/status yet."
+  fi
+}
+
 monitor_menu() {
   while true; do
     echo
@@ -553,6 +594,8 @@ main() {
 
   systemctl daemon-reload
   systemctl enable --now "$(basename "$service_file")"
+
+  show_post_install_status "$(basename "$service_file")" "$api_addr"
 
   echo
   echo "Deployment complete."
