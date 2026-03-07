@@ -468,6 +468,29 @@ map_go_arch() {
   esac
 }
 
+find_go_binary() {
+  local candidate
+  if candidate="$(command -v go 2>/dev/null)"; then
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  fi
+
+  for candidate in \
+    "/usr/local/go/bin/go" \
+    "/usr/bin/go" \
+    "/usr/local/bin/go"
+  do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 resolve_go_versions() {
   local minimum_version preferred_version
   minimum_version="$(awk '/^go / { print "go" $2; exit }' "$REPO_DIR/go.mod")"
@@ -521,10 +544,9 @@ ensure_go() {
   local minimum_version preferred_version
   read -r minimum_version preferred_version <<< "$(resolve_go_versions)"
 
-  if command -v go >/dev/null 2>&1; then
-    local installed_go installed_version
-    installed_go="$(command -v go)"
-    installed_version="$(go version | awk '{print $3}')"
+  local installed_go installed_version
+  if installed_go="$(find_go_binary)"; then
+    installed_version="$("$installed_go" version | awk '{print $3}')"
     if version_gte "$installed_version" "$minimum_version"; then
       GO_BIN="$installed_go"
       echo "Using existing Go ${installed_version} from ${installed_go}. Minimum required is ${minimum_version}; preferred toolchain is ${preferred_version}."
