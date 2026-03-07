@@ -90,6 +90,34 @@ prompt_yes_no() {
   done
 }
 
+read_json_string() {
+  local path="$1"
+  local key_path="$2"
+  python3 - "$path" "$key_path" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+key_path = sys.argv[2].split(".")
+if not path.exists():
+    raise SystemExit(0)
+
+try:
+    value = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(0)
+
+for key in key_path:
+    if not isinstance(value, dict):
+        raise SystemExit(0)
+    value = value.get(key)
+
+if isinstance(value, str) and value.strip():
+    print(value.strip())
+PY
+}
+
 append_monitor_json() {
   python3 - "$TMP_MONITORS" <<'PY'
 import json
@@ -798,6 +826,7 @@ main() {
   fi
 
   local config_dir config_file env_file service_file bin_path api_addr log_file state_file
+  local api_addr_default log_file_default state_file_default
   config_dir="$(prompt_default "rpi-procmon config directory" "$DEFAULT_CONFIG_DIR")"
   config_file="$config_dir/config.json"
   if [[ -f "$config_file" ]]; then
@@ -806,9 +835,12 @@ main() {
   env_file="$(prompt_default "Environment file path" "$DEFAULT_ENV_FILE")"
   service_file="$(prompt_default "systemd service path" "$DEFAULT_SERVICE_FILE")"
   bin_path="$(prompt_default "Binary install path" "$DEFAULT_BIN_PATH")"
-  api_addr="$(prompt_default "Procmon API listen address" "$DEFAULT_API_ADDR")"
-  log_file="$(prompt_default "Procmon log file" "$DEFAULT_LOG_FILE")"
-  state_file="$(prompt_default "Procmon state file" "$DEFAULT_STATE_FILE")"
+  api_addr_default="$(read_json_string "$config_file" "api.listen_address")"
+  log_file_default="$(read_json_string "$config_file" "log_file")"
+  state_file_default="$(read_json_string "$config_file" "state_file")"
+  api_addr="$(prompt_default "Procmon API listen address" "${api_addr_default:-$DEFAULT_API_ADDR}")"
+  log_file="$(prompt_default "Procmon log file" "${log_file_default:-$DEFAULT_LOG_FILE}")"
+  state_file="$(prompt_default "Procmon state file" "${state_file_default:-$DEFAULT_STATE_FILE}")"
   BIN_PATH="$bin_path"
 
   monitor_menu
@@ -824,7 +856,12 @@ main() {
   install_service_files "$config_file" "$env_file" "$service_file" "$log_file" "$state_file" "$api_addr"
 
   systemctl daemon-reload
-  systemctl enable --now "$(basename "$service_file")"
+  systemctl enable "$(basename "$service_file")"
+  if systemctl is-active --quiet "$(basename "$service_file")"; then
+    systemctl restart "$(basename "$service_file")"
+  else
+    systemctl start "$(basename "$service_file")"
+  fi
 
   show_post_install_status "$(basename "$service_file")" "$api_addr"
 
