@@ -811,7 +811,7 @@
 
     function renderStats(snapshot) {
       const stats = [
-        { label: "Overall", value: snapshot.overall_status || "unknown", note: `Version ${snapshot.app_version || "dev"}` },
+        { label: "Overall", value: snapshot.overall_status || "unknown", note: `Version ${snapshot.app_version || "eddc6bb"}` },
         { label: "Healthy", value: snapshot.healthy_count ?? 0, note: "Monitors currently passing checks" },
         { label: "Recovering", value: snapshot.recovering_count ?? 0, note: "Services in active remediation" },
         { label: "Attention", value: (snapshot.degraded_count ?? 0) + (snapshot.failed_count ?? 0), note: "Degraded or failed monitors" },

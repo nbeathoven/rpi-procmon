@@ -17,7 +17,7 @@ import (
 	"github.com/nbeathoven/rpi-procmon/internal/logging"
 )
 
-var appVersion = "dev"
+var appVersion = "eddc6bb"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
