@@ -167,6 +167,16 @@ curl http://127.0.0.1:9645/monitors
 curl http://127.0.0.1:9645/monitors/scrypted-arlo
 ```
 
+## UI Preview
+
+The API also serves a browser preview for the proposed Homebridge-style dashboard:
+
+```bash
+open http://127.0.0.1:9645/ui/
+```
+
+That page reads directly from the running procmon API and shows overall health, per-monitor cards, recent issues, and detailed monitor history. Restart and reboot controls are visible but intentionally disabled until authenticated write endpoints exist.
+
 ## Monitor Model
 
 Each monitor defines:

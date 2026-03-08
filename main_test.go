@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -436,6 +438,36 @@ func TestEventsAPIExposesRecentHistory(t *testing.T) {
 	}
 	if body.Events[0].ID != "ma352-2" || body.Events[1].ID != "ma352-1" {
 		t.Fatalf("expected reverse chronological order, got %#v", body.Events)
+	}
+}
+
+func TestUIPageIsServedFromAPI(t *testing.T) {
+	cfg := config.Config{
+		API: config.APIConfig{
+			ListenAddress: "127.0.0.1:9645",
+		},
+	}
+	manager := &stubProvider{}
+
+	server := httptest.NewServer(api.NewServer(cfg, manager).Handler)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/ui/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected /ui/ status 200, got %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "Procmon Control Surface") {
+		t.Fatalf("expected UI HTML to be served, got %q", string(body))
 	}
 }
 

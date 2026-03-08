@@ -1,6 +1,7 @@
 package api
 
 import (
+	"embed"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -12,6 +13,9 @@ import (
 	"github.com/nbeathoven/rpi-procmon/internal/state"
 )
 
+//go:embed ui/index.html
+var uiFS embed.FS
+
 type SnapshotProvider interface {
 	Snapshot() state.ProcmonStatus
 	MonitorSnapshot(id string) (*state.MonitorRuntimeState, bool)
@@ -20,6 +24,11 @@ type SnapshotProvider interface {
 
 func NewServer(cfg config.Config, provider SnapshotProvider) *http.Server {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/ui", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/ui/", http.StatusMovedPermanently)
+	})
+	mux.HandleFunc("/ui/", serveUI)
+	mux.HandleFunc("/ui/index.html", serveUI)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		snapshot := provider.Snapshot()
 		ok := overallStatusHealthy(snapshot.OverallStatus)
@@ -77,6 +86,20 @@ func NewServer(cfg config.Config, provider SnapshotProvider) *http.Server {
 		Handler:           mux,
 		ReadHeaderTimeout: parseDuration(cfg.API.ReadHeaderTimeout, 5*time.Second),
 	}
+}
+
+func serveUI(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/ui/" && r.URL.Path != "/ui/index.html" {
+		http.NotFound(w, r)
+		return
+	}
+	data, err := uiFS.ReadFile("ui/index.html")
+	if err != nil {
+		http.Error(w, "ui unavailable", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(data)
 }
 
 func parseEventFilter(r *http.Request) (events.Filter, error) {

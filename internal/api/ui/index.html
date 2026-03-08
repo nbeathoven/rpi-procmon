@@ -1,0 +1,1011 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Procmon Console</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4efe6;
+      --panel: rgba(255, 252, 247, 0.86);
+      --panel-strong: rgba(255, 249, 240, 0.96);
+      --text: #1e2730;
+      --muted: #5d6a72;
+      --line: rgba(30, 39, 48, 0.12);
+      --healthy: #177245;
+      --recovering: #c77e00;
+      --degraded: #be4d00;
+      --failed: #a6252a;
+      --unknown: #50616c;
+      --accent: #0f6a73;
+      --accent-soft: rgba(15, 106, 115, 0.12);
+      --shadow: 0 18px 50px rgba(44, 51, 58, 0.12);
+      --radius: 24px;
+      --mono: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      --display: "Avenir Next", "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--display);
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(255, 183, 77, 0.28), transparent 30%),
+        radial-gradient(circle at top right, rgba(15, 106, 115, 0.18), transparent 28%),
+        linear-gradient(180deg, #faf5ec 0%, var(--bg) 100%);
+    }
+
+    .shell {
+      width: min(1400px, calc(100vw - 32px));
+      margin: 24px auto 40px;
+    }
+
+    .hero,
+    .panel {
+      backdrop-filter: blur(12px);
+      background: var(--panel);
+      border: 1px solid rgba(255, 255, 255, 0.8);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .hero {
+      padding: 28px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: auto -120px -120px auto;
+      width: 280px;
+      height: 280px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(15, 106, 115, 0.14), transparent 68%);
+      pointer-events: none;
+    }
+
+    .hero-top,
+    .toolbar,
+    .stat-grid,
+    .content-grid,
+    .monitor-grid,
+    .detail-grid,
+    .timeline {
+      display: grid;
+      gap: 16px;
+    }
+
+    .hero-top {
+      grid-template-columns: 1.4fr 1fr;
+      align-items: start;
+      margin-bottom: 22px;
+    }
+
+    .eyebrow {
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      font-size: 0.72rem;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      font-size: clamp(2rem, 4vw, 3.5rem);
+      line-height: 0.95;
+      max-width: 9ch;
+      margin-bottom: 12px;
+    }
+
+    .subhead {
+      font-size: 1rem;
+      line-height: 1.6;
+      color: var(--muted);
+      max-width: 64ch;
+    }
+
+    .toolbar {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      align-self: stretch;
+    }
+
+    .toolbar-card,
+    .stat,
+    .monitor-card,
+    .detail-card,
+    .timeline-card,
+    .empty-state {
+      background: var(--panel-strong);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+    }
+
+    .toolbar-card {
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      justify-content: space-between;
+    }
+
+    .toolbar-card label,
+    .detail-label {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+
+    .toolbar-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .toolbar input,
+    .toolbar select,
+    .toolbar button,
+    .monitor-actions button,
+    .detail-actions button {
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      font: inherit;
+      height: 42px;
+    }
+
+    .toolbar input,
+    .toolbar select {
+      background: white;
+      color: var(--text);
+      padding: 0 14px;
+      min-width: 0;
+      width: 100%;
+    }
+
+    button {
+      cursor: pointer;
+      transition: transform 140ms ease, background 140ms ease, border-color 140ms ease;
+    }
+
+    button:hover:not(:disabled) {
+      transform: translateY(-1px);
+    }
+
+    .primary {
+      background: var(--accent);
+      color: white;
+      border-color: transparent;
+      padding: 0 16px;
+    }
+
+    .secondary {
+      background: rgba(255, 255, 255, 0.72);
+      color: var(--text);
+      padding: 0 16px;
+    }
+
+    .danger {
+      background: rgba(166, 37, 42, 0.08);
+      color: var(--failed);
+      border-color: rgba(166, 37, 42, 0.18);
+      padding: 0 16px;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.48;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      padding: 9px 14px;
+      font-size: 0.88rem;
+      font-weight: 700;
+      text-transform: capitalize;
+      width: fit-content;
+      background: rgba(80, 97, 108, 0.14);
+      color: var(--unknown);
+    }
+
+    .status-pill::before,
+    .status-dot::before {
+      content: "";
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.56);
+    }
+
+    .status-healthy {
+      background: rgba(23, 114, 69, 0.14);
+      color: var(--healthy);
+    }
+
+    .status-recovering {
+      background: rgba(199, 126, 0, 0.14);
+      color: var(--recovering);
+    }
+
+    .status-degraded {
+      background: rgba(190, 77, 0, 0.14);
+      color: var(--degraded);
+    }
+
+    .status-failed {
+      background: rgba(166, 37, 42, 0.14);
+      color: var(--failed);
+    }
+
+    .status-unknown,
+    .status-disabled {
+      background: rgba(80, 97, 108, 0.14);
+      color: var(--unknown);
+    }
+
+    .stat-grid {
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
+    .stat {
+      padding: 18px;
+      display: grid;
+      gap: 8px;
+      min-height: 110px;
+    }
+
+    .stat-value {
+      font-size: clamp(1.6rem, 3vw, 2.4rem);
+      line-height: 1;
+    }
+
+    .stat-note {
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.5;
+    }
+
+    .content-grid {
+      grid-template-columns: 1.25fr 0.9fr;
+      margin-top: 22px;
+      align-items: start;
+    }
+
+    .panel {
+      padding: 20px;
+    }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-end;
+      margin-bottom: 16px;
+    }
+
+    .panel-copy {
+      color: var(--muted);
+      line-height: 1.5;
+      font-size: 0.94rem;
+    }
+
+    .monitor-grid {
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    }
+
+    .monitor-card {
+      padding: 18px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .monitor-card.selected {
+      border-color: rgba(15, 106, 115, 0.42);
+      box-shadow: inset 0 0 0 1px rgba(15, 106, 115, 0.24);
+    }
+
+    .monitor-head,
+    .monitor-meta,
+    .monitor-actions,
+    .detail-actions,
+    .detail-grid,
+    .timeline-header {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .monitor-name {
+      font-size: 1.15rem;
+    }
+
+    .status-dot {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.88rem;
+      text-transform: capitalize;
+      color: var(--muted);
+    }
+
+    .meta-chip {
+      border-radius: 999px;
+      padding: 7px 11px;
+      background: rgba(15, 106, 115, 0.08);
+      color: var(--accent);
+      font-size: 0.82rem;
+    }
+
+    .monitor-summary {
+      color: var(--muted);
+      line-height: 1.5;
+      min-height: 48px;
+    }
+
+    .detail-card {
+      padding: 18px;
+      display: grid;
+      gap: 18px;
+    }
+
+    .detail-grid {
+      justify-content: flex-start;
+    }
+
+    .detail-value {
+      font-weight: 700;
+      font-size: 1rem;
+    }
+
+    .detail-block {
+      display: grid;
+      gap: 8px;
+    }
+
+    .stack {
+      display: grid;
+      gap: 10px;
+    }
+
+    .result-row,
+    .timeline-card {
+      padding: 14px 16px;
+    }
+
+    .result-row {
+      border-radius: 16px;
+      background: rgba(15, 106, 115, 0.05);
+      border: 1px solid rgba(15, 106, 115, 0.08);
+    }
+
+    .result-row.fail {
+      background: rgba(166, 37, 42, 0.06);
+      border-color: rgba(166, 37, 42, 0.14);
+    }
+
+    .result-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 6px;
+      align-items: center;
+    }
+
+    .result-name {
+      font-weight: 700;
+    }
+
+    .result-message,
+    .timeline-reason,
+    .mono {
+      font-family: var(--mono);
+      font-size: 0.84rem;
+      line-height: 1.5;
+      color: var(--muted);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .timeline {
+      grid-template-columns: 1fr;
+    }
+
+    .timeline-card {
+      display: grid;
+      gap: 8px;
+    }
+
+    .timeline-type {
+      font-size: 0.8rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .empty-state {
+      padding: 28px;
+      color: var(--muted);
+      line-height: 1.6;
+      text-align: center;
+    }
+
+    .footer-note {
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 0.84rem;
+      line-height: 1.5;
+    }
+
+    .live {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    .live::before {
+      content: "";
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--healthy);
+      animation: pulse 1.8s infinite;
+    }
+
+    .alert {
+      margin-top: 18px;
+      border-radius: 18px;
+      padding: 14px 16px;
+      background: rgba(190, 77, 0, 0.1);
+      color: #7f3d11;
+      border: 1px solid rgba(190, 77, 0, 0.15);
+      display: none;
+    }
+
+    .alert.visible {
+      display: block;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.35; transform: scale(0.85); }
+    }
+
+    @media (max-width: 1120px) {
+      .hero-top,
+      .content-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .stat-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 720px) {
+      .shell {
+        width: min(100vw - 20px, 1000px);
+        margin: 10px auto 28px;
+      }
+
+      .hero,
+      .panel {
+        padding: 16px;
+        border-radius: 22px;
+      }
+
+      .toolbar,
+      .stat-grid {
+        grid-template-columns: 1fr;
+      }
+
+      h1 {
+        max-width: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div class="hero-top">
+        <div>
+          <div class="eyebrow">Raspberry Pi service supervision</div>
+          <h1>Procmon Control Surface</h1>
+          <p class="subhead">
+            Live health, recent faults, and recovery visibility for the services behind your Pi.
+            This preview reads directly from the running procmon API and keeps restart controls visible
+            but disabled until write endpoints exist.
+          </p>
+        </div>
+        <div class="toolbar">
+          <div class="toolbar-card">
+            <label for="api-base">API base URL</label>
+            <div class="toolbar-row">
+              <input id="api-base" type="text" placeholder="http://127.0.0.1:9645">
+            </div>
+            <div class="toolbar-row">
+              <button id="save-base" class="primary">Connect</button>
+              <button id="refresh" class="secondary">Refresh now</button>
+            </div>
+          </div>
+          <div class="toolbar-card">
+            <label for="refresh-interval">Refresh cadence</label>
+            <div class="toolbar-row">
+              <select id="refresh-interval">
+                <option value="0">Manual</option>
+                <option value="5000">Every 5s</option>
+                <option value="10000" selected>Every 10s</option>
+                <option value="15000">Every 15s</option>
+                <option value="30000">Every 30s</option>
+              </select>
+            </div>
+            <div class="toolbar-row">
+              <span class="live" id="connection-state">Live polling enabled</span>
+              <span class="mono" id="last-sync">No refresh yet</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="overall-pill" class="status-pill status-unknown">Unknown</div>
+
+      <div class="stat-grid" id="stats"></div>
+      <div class="alert" id="error-banner"></div>
+    </section>
+
+    <section class="content-grid">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Monitors</h2>
+            <p class="panel-copy">A live grid of configured monitors, their current state, and the most recent reason they needed attention.</p>
+          </div>
+          <span class="mono" id="monitor-count-label">0 monitors</span>
+        </div>
+        <div id="monitor-grid" class="monitor-grid"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Recent Issues</h2>
+            <p class="panel-copy">Reverse-chronological events from procmon, suitable for the future Homebridge issue history panel.</p>
+          </div>
+          <span class="mono" id="events-count-label">0 events</span>
+        </div>
+        <div id="timeline" class="timeline"></div>
+      </section>
+    </section>
+
+    <section class="panel" style="margin-top: 22px;">
+      <div class="panel-header">
+        <div>
+          <h2>Selected Monitor</h2>
+          <p class="panel-copy">Check-level detail, recovery history, and future control affordances for the currently selected monitor.</p>
+        </div>
+        <div class="detail-actions">
+          <button class="secondary" id="open-monitor-json">Open JSON</button>
+          <button class="danger" disabled title="Requires future procmon control endpoints">Restart service</button>
+          <button class="danger" disabled title="Requires future procmon control endpoints">Restart procmon</button>
+          <button class="danger" disabled title="Requires future procmon control endpoints">Reboot host</button>
+        </div>
+      </div>
+      <div id="detail-root"></div>
+      <p class="footer-note">
+        Read-side integration is live now through <span class="mono">/status</span>, <span class="mono">/monitors/{id}</span>, and <span class="mono">/events</span>.
+        Service restart and reboot actions are intentionally disabled until procmon exposes authenticated write endpoints.
+      </p>
+    </section>
+  </main>
+
+  <script>
+    const state = {
+      apiBase: "",
+      snapshot: null,
+      events: [],
+      selectedMonitorID: "",
+      refreshTimer: null,
+    };
+
+    const elements = {
+      apiBase: document.getElementById("api-base"),
+      saveBase: document.getElementById("save-base"),
+      refresh: document.getElementById("refresh"),
+      refreshInterval: document.getElementById("refresh-interval"),
+      lastSync: document.getElementById("last-sync"),
+      connectionState: document.getElementById("connection-state"),
+      overallPill: document.getElementById("overall-pill"),
+      stats: document.getElementById("stats"),
+      monitorGrid: document.getElementById("monitor-grid"),
+      detailRoot: document.getElementById("detail-root"),
+      timeline: document.getElementById("timeline"),
+      errorBanner: document.getElementById("error-banner"),
+      monitorCountLabel: document.getElementById("monitor-count-label"),
+      eventsCountLabel: document.getElementById("events-count-label"),
+      openMonitorJSON: document.getElementById("open-monitor-json"),
+    };
+
+    function normalizeBaseURL(value) {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return window.location.origin;
+      }
+      return trimmed.replace(/\/+$/, "");
+    }
+
+    function fmtTimestamp(value) {
+      if (!value) {
+        return "Never";
+      }
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) {
+        return value;
+      }
+      return new Intl.DateTimeFormat(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(date);
+    }
+
+    function fmtDurationMS(ms) {
+      if (!ms && ms !== 0) {
+        return "n/a";
+      }
+      if (ms < 1000) {
+        return `${ms} ms`;
+      }
+      return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`;
+    }
+
+    function statusClass(status) {
+      const normalized = String(status || "unknown").toLowerCase();
+      switch (normalized) {
+        case "healthy":
+        case "recovering":
+        case "degraded":
+        case "failed":
+        case "disabled":
+          return `status-${normalized}`;
+        default:
+          return "status-unknown";
+      }
+    }
+
+    function escapeHTML(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll("\"", "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    async function fetchJSON(path) {
+      const response = await fetch(`${state.apiBase}${path}`, {
+        headers: { "Accept": "application/json" },
+      });
+      if (!response.ok) {
+        throw new Error(`${response.status} ${response.statusText} for ${path}`);
+      }
+      return response.json();
+    }
+
+    function showError(message) {
+      elements.errorBanner.textContent = message;
+      elements.errorBanner.classList.add("visible");
+      elements.connectionState.textContent = "Connection problem";
+    }
+
+    function clearError() {
+      elements.errorBanner.textContent = "";
+      elements.errorBanner.classList.remove("visible");
+      elements.connectionState.textContent = state.refreshTimer ? "Live polling enabled" : "Manual refresh";
+    }
+
+    function renderStats(snapshot) {
+      const stats = [
+        { label: "Overall", value: snapshot.overall_status || "unknown", note: `Version ${snapshot.app_version || "dev"}` },
+        { label: "Healthy", value: snapshot.healthy_count ?? 0, note: "Monitors currently passing checks" },
+        { label: "Recovering", value: snapshot.recovering_count ?? 0, note: "Services in active remediation" },
+        { label: "Attention", value: (snapshot.degraded_count ?? 0) + (snapshot.failed_count ?? 0), note: "Degraded or failed monitors" },
+        { label: "Uptime", value: formatUptime(snapshot.uptime_seconds ?? 0), note: `Procmon started ${fmtTimestamp(snapshot.started_at)}` },
+      ];
+
+      elements.stats.innerHTML = stats.map((item) => `
+        <article class="stat">
+          <span class="detail-label">${escapeHTML(item.label)}</span>
+          <strong class="stat-value">${escapeHTML(item.value)}</strong>
+          <span class="stat-note">${escapeHTML(item.note)}</span>
+        </article>
+      `).join("");
+    }
+
+    function formatUptime(seconds) {
+      if (!seconds) {
+        return "0m";
+      }
+      const days = Math.floor(seconds / 86400);
+      const hours = Math.floor((seconds % 86400) / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      const parts = [];
+      if (days) parts.push(`${days}d`);
+      if (hours) parts.push(`${hours}h`);
+      if (minutes || !parts.length) parts.push(`${minutes}m`);
+      return parts.join(" ");
+    }
+
+    function buildMonitorSummary(monitor) {
+      if (monitor.last_failure_reasons && monitor.last_failure_reasons.length) {
+        return monitor.last_failure_reasons[0];
+      }
+      if (monitor.last_error) {
+        return monitor.last_error;
+      }
+      if (monitor.status === "healthy") {
+        return "All configured checks are currently passing.";
+      }
+      if (monitor.status === "recovering") {
+        return "Recovery steps are in progress or recently succeeded.";
+      }
+      if (monitor.status === "disabled") {
+        return "This monitor is configured but disabled.";
+      }
+      return "No detailed reason reported yet.";
+    }
+
+    function renderMonitors(snapshot) {
+      const monitors = Array.isArray(snapshot.monitors) ? snapshot.monitors : [];
+      elements.monitorCountLabel.textContent = `${monitors.length} monitor${monitors.length === 1 ? "" : "s"}`;
+
+      if (!monitors.length) {
+        elements.monitorGrid.innerHTML = `<div class="empty-state">No monitors are configured in the procmon snapshot.</div>`;
+        return;
+      }
+
+      elements.monitorGrid.innerHTML = monitors.map((monitor) => {
+        const selected = monitor.id === state.selectedMonitorID ? " selected" : "";
+        return `
+          <article class="monitor-card${selected}" data-monitor-id="${escapeHTML(monitor.id)}">
+            <div class="monitor-head">
+              <div>
+                <h3 class="monitor-name">${escapeHTML(monitor.name || monitor.id)}</h3>
+                <div class="status-dot ${statusClass(monitor.status)}">${escapeHTML(monitor.status || "unknown")}</div>
+              </div>
+              <span class="meta-chip">${escapeHTML(monitor.type || "monitor")}</span>
+            </div>
+            <div class="monitor-meta">
+              <span class="meta-chip">Next ${escapeHTML(fmtTimestamp(monitor.next_check_at))}</span>
+              <span class="meta-chip">Cooldown ${escapeHTML(monitor.cooldown || "n/a")}</span>
+            </div>
+            <p class="monitor-summary">${escapeHTML(buildMonitorSummary(monitor))}</p>
+            <div class="monitor-actions">
+              <button class="secondary" data-monitor-open="${escapeHTML(monitor.id)}">Inspect</button>
+              <button class="danger" disabled title="Requires future procmon control endpoints">Restart</button>
+            </div>
+          </article>
+        `;
+      }).join("");
+
+      elements.monitorGrid.querySelectorAll("[data-monitor-open]").forEach((button) => {
+        button.addEventListener("click", () => selectMonitor(button.getAttribute("data-monitor-open")));
+      });
+    }
+
+    function renderDetail(monitor) {
+      if (!monitor) {
+        elements.detailRoot.innerHTML = `<div class="empty-state">Select a monitor to inspect its checks, history, and recovery details.</div>`;
+        return;
+      }
+
+      const checks = Array.isArray(monitor.last_check_results) ? monitor.last_check_results : [];
+      const recoveries = Array.isArray(monitor.last_recovery_results) ? monitor.last_recovery_results : [];
+      const reasons = Array.isArray(monitor.last_failure_reasons) ? monitor.last_failure_reasons : [];
+
+      elements.detailRoot.innerHTML = `
+        <div class="detail-card">
+          <div class="monitor-head">
+            <div>
+              <div class="detail-label">Monitor</div>
+              <h3 class="monitor-name">${escapeHTML(monitor.name || monitor.id)}</h3>
+            </div>
+            <div class="status-pill ${statusClass(monitor.status)}">${escapeHTML(monitor.status || "unknown")}</div>
+          </div>
+
+          <div class="detail-grid">
+            <div class="detail-block">
+              <span class="detail-label">Monitor ID</span>
+              <span class="detail-value mono">${escapeHTML(monitor.id)}</span>
+            </div>
+            <div class="detail-block">
+              <span class="detail-label">Type</span>
+              <span class="detail-value">${escapeHTML(monitor.type || "unknown")}</span>
+            </div>
+            <div class="detail-block">
+              <span class="detail-label">Last success</span>
+              <span class="detail-value">${escapeHTML(fmtTimestamp(monitor.last_success_at))}</span>
+            </div>
+            <div class="detail-block">
+              <span class="detail-label">Last failure</span>
+              <span class="detail-value">${escapeHTML(fmtTimestamp(monitor.last_failure_at))}</span>
+            </div>
+            <div class="detail-block">
+              <span class="detail-label">Next check</span>
+              <span class="detail-value">${escapeHTML(fmtTimestamp(monitor.next_check_at))}</span>
+            </div>
+            <div class="detail-block">
+              <span class="detail-label">Recovery count</span>
+              <span class="detail-value">${escapeHTML(monitor.recovery_count ?? 0)}</span>
+            </div>
+          </div>
+
+          <div class="stack">
+            <div class="detail-block">
+              <span class="detail-label">Last failure reasons</span>
+              ${reasons.length
+                ? reasons.map((reason) => `<div class="result-row fail"><div class="result-message">${escapeHTML(reason)}</div></div>`).join("")
+                : `<div class="result-row"><div class="result-message">No failure reasons recorded.</div></div>`}
+            </div>
+
+            <div class="detail-block">
+              <span class="detail-label">Last check results</span>
+              ${checks.length
+                ? checks.map((result) => `
+                  <div class="result-row ${result.success ? "" : "fail"}">
+                    <div class="result-top">
+                      <span class="result-name">${escapeHTML(result.name || result.id || result.type)}</span>
+                      <span class="mono">${escapeHTML(fmtDurationMS(result.duration_ms))}</span>
+                    </div>
+                    <div class="result-message">${escapeHTML(result.message || "No message")}</div>
+                  </div>
+                `).join("")
+                : `<div class="result-row"><div class="result-message">No check result history available.</div></div>`}
+            </div>
+
+            <div class="detail-block">
+              <span class="detail-label">Last recovery results</span>
+              ${recoveries.length
+                ? recoveries.map((result) => `
+                  <div class="result-row ${result.success ? "" : "fail"}">
+                    <div class="result-top">
+                      <span class="result-name">${escapeHTML(result.name || result.type)}</span>
+                      <span class="mono">${escapeHTML(fmtDurationMS(result.duration_ms))}</span>
+                    </div>
+                    <div class="result-message">${escapeHTML(result.message || "No message")}</div>
+                    ${result.output ? `<div class="mono">${escapeHTML(result.output)}</div>` : ""}
+                  </div>
+                `).join("")
+                : `<div class="result-row"><div class="result-message">No recovery action history available.</div></div>`}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderEvents(events) {
+      elements.eventsCountLabel.textContent = `${events.length} event${events.length === 1 ? "" : "s"}`;
+      if (!events.length) {
+        elements.timeline.innerHTML = `<div class="empty-state">No monitor issues have been reported yet.</div>`;
+        return;
+      }
+
+      elements.timeline.innerHTML = events.map((event) => `
+        <article class="timeline-card">
+          <div class="timeline-header">
+            <strong>${escapeHTML(event.monitor_name || event.monitor_id || "Unknown monitor")}</strong>
+            <div class="status-pill ${statusClass(event.status_after)}">${escapeHTML(event.status_after || event.event_type || "event")}</div>
+          </div>
+          <div class="timeline-type">${escapeHTML((event.event_type || "event").replaceAll("_", " "))}</div>
+          <div class="timeline-reason">${escapeHTML(event.reason || "No reason attached to this event.")}</div>
+          <div class="mono">${escapeHTML(fmtTimestamp(event.timestamp))}</div>
+        </article>
+      `).join("");
+    }
+
+    async function selectMonitor(id) {
+      state.selectedMonitorID = id;
+      renderMonitors(state.snapshot || { monitors: [] });
+      try {
+        const detail = await fetchJSON(`/monitors/${encodeURIComponent(id)}`);
+        renderDetail(detail);
+        elements.openMonitorJSON.onclick = () => {
+          window.open(`${state.apiBase}/monitors/${encodeURIComponent(id)}`, "_blank", "noopener");
+        };
+      } catch (error) {
+        renderDetail(null);
+        showError(`Failed to load monitor detail for ${id}: ${error.message}`);
+      }
+    }
+
+    async function refreshData() {
+      try {
+        const [snapshot, eventPayload] = await Promise.all([
+          fetchJSON("/status"),
+          fetchJSON("/events?limit=12"),
+        ]);
+        state.snapshot = snapshot;
+        state.events = Array.isArray(eventPayload.events) ? eventPayload.events : [];
+        clearError();
+
+        const overall = snapshot.overall_status || "unknown";
+        elements.overallPill.className = `status-pill ${statusClass(overall)}`;
+        elements.overallPill.textContent = overall;
+        elements.lastSync.textContent = `Last sync ${fmtTimestamp(new Date().toISOString())}`;
+
+        if (!state.selectedMonitorID) {
+          const monitors = Array.isArray(snapshot.monitors) ? snapshot.monitors : [];
+          const attention = monitors.find((monitor) => ["failed", "degraded", "recovering"].includes(monitor.status));
+          state.selectedMonitorID = (attention || monitors[0] || {}).id || "";
+        }
+
+        renderStats(snapshot);
+        renderMonitors(snapshot);
+        renderEvents(state.events);
+
+        if (state.selectedMonitorID) {
+          await selectMonitor(state.selectedMonitorID);
+        } else {
+          renderDetail(null);
+        }
+      } catch (error) {
+        showError(`Failed to refresh procmon data from ${state.apiBase}: ${error.message}`);
+      }
+    }
+
+    function restartPolling() {
+      if (state.refreshTimer) {
+        clearInterval(state.refreshTimer);
+        state.refreshTimer = null;
+      }
+
+      const interval = Number(elements.refreshInterval.value);
+      if (interval > 0) {
+        state.refreshTimer = window.setInterval(refreshData, interval);
+      }
+      clearError();
+    }
+
+    function loadInitialSettings() {
+      const params = new URLSearchParams(window.location.search);
+      const stored = window.localStorage.getItem("procmon-ui-api-base") || "";
+      const initial = params.get("apiBase") || stored || window.location.origin;
+      state.apiBase = normalizeBaseURL(initial);
+      elements.apiBase.value = state.apiBase;
+    }
+
+    elements.saveBase.addEventListener("click", async () => {
+      state.apiBase = normalizeBaseURL(elements.apiBase.value);
+      window.localStorage.setItem("procmon-ui-api-base", state.apiBase);
+      await refreshData();
+    });
+
+    elements.refresh.addEventListener("click", refreshData);
+    elements.refreshInterval.addEventListener("change", restartPolling);
+
+    loadInitialSettings();
+    restartPolling();
+    refreshData();
+  </script>
+</body>
+</html>
