@@ -83,9 +83,22 @@ func NewServer(cfg config.Config, provider SnapshotProvider) *http.Server {
 
 	return &http.Server{
 		Addr:              cfg.API.ListenAddress,
-		Handler:           mux,
+		Handler:           withCORS(mux),
 		ReadHeaderTimeout: parseDuration(cfg.API.ReadHeaderTimeout, 5*time.Second),
 	}
+}
+
+func withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func serveUI(w http.ResponseWriter, r *http.Request) {

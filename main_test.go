@@ -471,6 +471,38 @@ func TestUIPageIsServedFromAPI(t *testing.T) {
 	}
 }
 
+func TestStatusAPIAllowsCrossOriginReads(t *testing.T) {
+	cfg := config.Config{
+		API: config.APIConfig{
+			ListenAddress: "127.0.0.1:9645",
+		},
+	}
+	manager := &stubProvider{
+		snapshot: state.ProcmonStatus{
+			OverallStatus: "healthy",
+		},
+	}
+
+	server := httptest.NewServer(api.NewServer(cfg, manager).Handler)
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/status", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Origin", "file://")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("expected Access-Control-Allow-Origin=*, got %q", got)
+	}
+}
+
 type stubProvider struct {
 	snapshot state.ProcmonStatus
 	monitor  *state.MonitorRuntimeState
