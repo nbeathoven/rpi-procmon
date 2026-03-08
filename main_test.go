@@ -25,14 +25,14 @@ type fakeRunner struct {
 	counts    map[string]int
 }
 
-func (f *fakeRunner) Run(_ context.Context, command string) (command.Outcome, error) {
+func (f *fakeRunner) Run(_ context.Context, cmd string) (command.Outcome, error) {
 	if f.counts == nil {
 		f.counts = make(map[string]int)
 	}
-	index := f.counts[command]
-	f.counts[command] = index + 1
+	index := f.counts[cmd]
+	f.counts[cmd] = index + 1
 
-	outcomes := f.responses[command]
+	outcomes := f.responses[cmd]
 	var outcome command.Outcome
 	if index < len(outcomes) {
 		outcome = outcomes[index]
@@ -40,7 +40,7 @@ func (f *fakeRunner) Run(_ context.Context, command string) (command.Outcome, er
 		outcome = outcomes[len(outcomes)-1]
 	}
 
-	errs := f.errors[command]
+	errs := f.errors[cmd]
 	var err error
 	if index < len(errs) {
 		err = errs[index]

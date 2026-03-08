@@ -13,37 +13,37 @@ type ProcmonState struct {
 }
 
 type MonitorRuntimeState struct {
-	ID                    string              `json:"id"`
-	Name                  string              `json:"name"`
-	Type                  string              `json:"type"`
-	Enabled               bool                `json:"enabled"`
-	Status                string              `json:"status"`
-	Interval              string              `json:"interval"`
-	FailureThreshold      int                 `json:"failure_threshold"`
-	Cooldown              string              `json:"cooldown"`
-	Metadata              map[string]string   `json:"metadata,omitempty"`
-	ConfiguredChecks      []config.CheckConfig `json:"configured_checks"`
+	ID                    string                `json:"id"`
+	Name                  string                `json:"name"`
+	Type                  string                `json:"type"`
+	Enabled               bool                  `json:"enabled"`
+	Status                string                `json:"status"`
+	Interval              string                `json:"interval"`
+	FailureThreshold      int                   `json:"failure_threshold"`
+	Cooldown              string                `json:"cooldown"`
+	Metadata              map[string]string     `json:"metadata,omitempty"`
+	ConfiguredChecks      []config.CheckConfig  `json:"configured_checks"`
 	ConfiguredRecoveries  []config.ActionConfig `json:"configured_recoveries"`
-	LastCheckStartedAt    string              `json:"last_check_started_at,omitempty"`
-	LastCheckFinishedAt   string              `json:"last_check_finished_at,omitempty"`
-	LastCheckDurationMS   int64               `json:"last_check_duration_ms,omitempty"`
-	NextCheckAt           string              `json:"next_check_at,omitempty"`
-	LastSuccessAt         string              `json:"last_success_at,omitempty"`
-	LastFailureAt         string              `json:"last_failure_at,omitempty"`
-	LastRecoveryAttemptAt string              `json:"last_recovery_attempt_at,omitempty"`
-	LastRecoverySuccessAt string              `json:"last_recovery_success_at,omitempty"`
-	LastRecoveryFailureAt string              `json:"last_recovery_failure_at,omitempty"`
-	CooldownUntil         string              `json:"cooldown_until,omitempty"`
-	ConsecutiveFailures   int                 `json:"consecutive_failures"`
-	CheckRunCount         int                 `json:"check_run_count"`
-	SuccessCount          int                 `json:"success_count"`
-	FailureCount          int                 `json:"failure_count"`
-	RecoveryCount         int                 `json:"recovery_count"`
-	RecoveryFailureCount  int                 `json:"recovery_failure_count"`
-	LastError             string              `json:"last_error,omitempty"`
-	LastFailureReasons    []string            `json:"last_failure_reasons,omitempty"`
-	LastCheckResults      []CheckResult       `json:"last_check_results,omitempty"`
-	LastRecoveryResults   []ActionResult      `json:"last_recovery_results,omitempty"`
+	LastCheckStartedAt    string                `json:"last_check_started_at,omitempty"`
+	LastCheckFinishedAt   string                `json:"last_check_finished_at,omitempty"`
+	LastCheckDurationMS   int64                 `json:"last_check_duration_ms,omitempty"`
+	NextCheckAt           string                `json:"next_check_at,omitempty"`
+	LastSuccessAt         string                `json:"last_success_at,omitempty"`
+	LastFailureAt         string                `json:"last_failure_at,omitempty"`
+	LastRecoveryAttemptAt string                `json:"last_recovery_attempt_at,omitempty"`
+	LastRecoverySuccessAt string                `json:"last_recovery_success_at,omitempty"`
+	LastRecoveryFailureAt string                `json:"last_recovery_failure_at,omitempty"`
+	CooldownUntil         string                `json:"cooldown_until,omitempty"`
+	ConsecutiveFailures   int                   `json:"consecutive_failures"`
+	CheckRunCount         int                   `json:"check_run_count"`
+	SuccessCount          int                   `json:"success_count"`
+	FailureCount          int                   `json:"failure_count"`
+	RecoveryCount         int                   `json:"recovery_count"`
+	RecoveryFailureCount  int                   `json:"recovery_failure_count"`
+	LastError             string                `json:"last_error,omitempty"`
+	LastFailureReasons    []string              `json:"last_failure_reasons,omitempty"`
+	LastCheckResults      []CheckResult         `json:"last_check_results,omitempty"`
+	LastRecoveryResults   []ActionResult        `json:"last_recovery_results,omitempty"`
 }
 
 type CheckResult struct {
