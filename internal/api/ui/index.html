@@ -6,28 +6,36 @@
   <title>Procmon Console</title>
   <style>
     :root {
-      color-scheme: light;
-      --bg: #f4efe6;
-      --panel: rgba(255, 252, 247, 0.86);
-      --panel-strong: rgba(255, 249, 240, 0.96);
-      --text: #1e2730;
-      --muted: #5d6a72;
-      --line: rgba(30, 39, 48, 0.12);
-      --healthy: #177245;
-      --recovering: #c77e00;
-      --degraded: #be4d00;
-      --failed: #a6252a;
-      --unknown: #50616c;
-      --accent: #0f6a73;
-      --accent-soft: rgba(15, 106, 115, 0.12);
-      --shadow: 0 18px 50px rgba(44, 51, 58, 0.12);
-      --radius: 24px;
+      color-scheme: dark;
+      --bg: #04163f;
+      --bg-deep: #020d28;
+      --hero-start: rgba(13, 37, 98, 0.78);
+      --hero-end: rgba(4, 19, 60, 0.44);
+      --panel: rgba(7, 22, 64, 0.44);
+      --panel-strong: rgba(255, 255, 255, 0.13);
+      --panel-soft: rgba(255, 255, 255, 0.08);
+      --text: #f8fbff;
+      --muted: rgba(225, 233, 255, 0.72);
+      --line: rgba(255, 255, 255, 0.16);
+      --line-strong: rgba(255, 204, 0, 0.34);
+      --healthy: #61dda2;
+      --recovering: #ffd54f;
+      --degraded: #ffab52;
+      --failed: #ff7a8f;
+      --unknown: #a8b7df;
+      --accent: #ffcc00;
+      --shadow: 0 26px 90px rgba(0, 0, 0, 0.28);
+      --radius: 28px;
       --mono: "SFMono-Regular", "Menlo", "Consolas", monospace;
-      --display: "Avenir Next", "Segoe UI", sans-serif;
+      --display: "Avenir Next", "Gill Sans", "Segoe UI", sans-serif;
     }
 
     * {
       box-sizing: border-box;
+    }
+
+    html {
+      background: var(--bg-deep);
     }
 
     body {
@@ -36,39 +44,88 @@
       font-family: var(--display);
       color: var(--text);
       background:
-        radial-gradient(circle at top left, rgba(255, 183, 77, 0.28), transparent 30%),
-        radial-gradient(circle at top right, rgba(15, 106, 115, 0.18), transparent 28%),
-        linear-gradient(180deg, #faf5ec 0%, var(--bg) 100%);
+        radial-gradient(circle at 12% 12%, rgba(255, 204, 0, 0.28), transparent 18%),
+        radial-gradient(circle at 84% 10%, rgba(114, 160, 255, 0.22), transparent 18%),
+        radial-gradient(circle at 80% 86%, rgba(255, 204, 0, 0.12), transparent 24%),
+        linear-gradient(135deg, #04184a 0%, #062a74 34%, #031237 72%, var(--bg-deep) 100%);
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    body::before,
+    body::after {
+      content: "";
+      position: fixed;
+      border-radius: 999px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    body::before {
+      top: 8vh;
+      left: -10vw;
+      width: 34vw;
+      height: 34vw;
+      background: radial-gradient(circle, rgba(255, 204, 0, 0.24), transparent 66%);
+      filter: blur(6px);
+    }
+
+    body::after {
+      right: -12vw;
+      bottom: -10vh;
+      width: 42vw;
+      height: 42vw;
+      background: radial-gradient(circle, rgba(82, 132, 255, 0.2), transparent 68%);
+      filter: blur(6px);
     }
 
     .shell {
       width: min(1400px, calc(100vw - 32px));
       margin: 24px auto 40px;
+      position: relative;
+      z-index: 1;
     }
 
     .hero,
     .panel {
-      backdrop-filter: blur(12px);
+      position: relative;
+      overflow: hidden;
+      backdrop-filter: blur(24px) saturate(150%);
+      -webkit-backdrop-filter: blur(24px) saturate(150%);
       background: var(--panel);
-      border: 1px solid rgba(255, 255, 255, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.18);
       border-radius: var(--radius);
       box-shadow: var(--shadow);
     }
 
+    .hero::before,
+    .panel::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(125deg, rgba(255, 255, 255, 0.16), transparent 28%, transparent 72%, rgba(255, 255, 255, 0.06)),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 34%);
+      pointer-events: none;
+    }
+
     .hero {
       padding: 28px;
-      position: relative;
-      overflow: hidden;
+      background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04)),
+        linear-gradient(160deg, var(--hero-start), var(--hero-end));
     }
 
     .hero::after {
       content: "";
       position: absolute;
-      inset: auto -120px -120px auto;
-      width: 280px;
-      height: 280px;
+      inset: auto -80px -110px auto;
+      width: 360px;
+      height: 360px;
       border-radius: 50%;
-      background: radial-gradient(circle, rgba(15, 106, 115, 0.14), transparent 68%);
+      background:
+        radial-gradient(circle, rgba(255, 204, 0, 0.28), transparent 44%),
+        radial-gradient(circle at 35% 35%, rgba(255, 255, 255, 0.22), transparent 20%);
       pointer-events: none;
     }
 
@@ -90,11 +147,12 @@
     }
 
     .eyebrow {
-      letter-spacing: 0.12em;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
       font-size: 0.72rem;
-      color: var(--muted);
+      color: rgba(255, 214, 76, 0.92);
       margin-bottom: 10px;
+      font-weight: 700;
     }
 
     h1,
@@ -109,11 +167,17 @@
       line-height: 0.95;
       max-width: 9ch;
       margin-bottom: 12px;
+      text-shadow: 0 18px 46px rgba(0, 0, 0, 0.24);
+    }
+
+    h2,
+    h3 {
+      letter-spacing: 0.01em;
     }
 
     .subhead {
       font-size: 1rem;
-      line-height: 1.6;
+      line-height: 1.7;
       color: var(--muted);
       max-width: 64ch;
     }
@@ -129,9 +193,12 @@
     .detail-card,
     .timeline-card,
     .empty-state {
-      background: var(--panel-strong);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.06)),
+        var(--panel-soft);
       border: 1px solid var(--line);
       border-radius: 20px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
     }
 
     .toolbar-card {
@@ -147,7 +214,7 @@
       font-size: 0.78rem;
       text-transform: uppercase;
       letter-spacing: 0.08em;
-      color: var(--muted);
+      color: rgba(227, 234, 255, 0.7);
     }
 
     .toolbar-row {
@@ -170,39 +237,46 @@
 
     .toolbar input,
     .toolbar select {
-      background: white;
+      background: rgba(255, 255, 255, 0.14);
       color: var(--text);
       padding: 0 14px;
       min-width: 0;
       width: 100%;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+    }
+
+    .toolbar input::placeholder {
+      color: rgba(232, 239, 255, 0.46);
     }
 
     button {
       cursor: pointer;
-      transition: transform 140ms ease, background 140ms ease, border-color 140ms ease;
+      transition: transform 140ms ease, background 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
     }
 
     button:hover:not(:disabled) {
       transform: translateY(-1px);
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
     }
 
     .primary {
-      background: var(--accent);
-      color: white;
+      background: linear-gradient(135deg, #ffd84d, #ffbf00);
+      color: #15204f;
       border-color: transparent;
       padding: 0 16px;
+      font-weight: 700;
     }
 
     .secondary {
-      background: rgba(255, 255, 255, 0.72);
+      background: rgba(255, 255, 255, 0.12);
       color: var(--text);
       padding: 0 16px;
     }
 
     .danger {
-      background: rgba(166, 37, 42, 0.08);
-      color: var(--failed);
-      border-color: rgba(166, 37, 42, 0.18);
+      background: rgba(255, 122, 143, 0.1);
+      color: #ffe2e7;
+      border-color: rgba(255, 122, 143, 0.2);
       padding: 0 16px;
     }
 
@@ -221,8 +295,10 @@
       font-weight: 700;
       text-transform: capitalize;
       width: fit-content;
-      background: rgba(80, 97, 108, 0.14);
+      background: rgba(168, 183, 223, 0.16);
       color: var(--unknown);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
     }
 
     .status-pill::before,
@@ -232,32 +308,32 @@
       height: 10px;
       border-radius: 50%;
       background: currentColor;
-      box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.56);
+      box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.12);
     }
 
     .status-healthy {
-      background: rgba(23, 114, 69, 0.14);
+      background: rgba(97, 221, 162, 0.14);
       color: var(--healthy);
     }
 
     .status-recovering {
-      background: rgba(199, 126, 0, 0.14);
+      background: rgba(255, 213, 79, 0.16);
       color: var(--recovering);
     }
 
     .status-degraded {
-      background: rgba(190, 77, 0, 0.14);
+      background: rgba(255, 171, 82, 0.16);
       color: var(--degraded);
     }
 
     .status-failed {
-      background: rgba(166, 37, 42, 0.14);
+      background: rgba(255, 122, 143, 0.16);
       color: var(--failed);
     }
 
     .status-unknown,
     .status-disabled {
-      background: rgba(80, 97, 108, 0.14);
+      background: rgba(168, 183, 223, 0.16);
       color: var(--unknown);
     }
 
@@ -315,11 +391,19 @@
       padding: 18px;
       display: grid;
       gap: 14px;
+      transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+    }
+
+    .monitor-card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(255, 255, 255, 0.24);
     }
 
     .monitor-card.selected {
-      border-color: rgba(15, 106, 115, 0.42);
-      box-shadow: inset 0 0 0 1px rgba(15, 106, 115, 0.24);
+      border-color: var(--line-strong);
+      box-shadow:
+        inset 0 0 0 1px rgba(255, 204, 0, 0.22),
+        0 20px 40px rgba(0, 0, 0, 0.18);
     }
 
     .monitor-head,
@@ -351,9 +435,10 @@
     .meta-chip {
       border-radius: 999px;
       padding: 7px 11px;
-      background: rgba(15, 106, 115, 0.08);
-      color: var(--accent);
+      background: rgba(255, 204, 0, 0.12);
+      color: #ffe587;
       font-size: 0.82rem;
+      border: 1px solid rgba(255, 204, 0, 0.16);
     }
 
     .monitor-summary {
@@ -394,13 +479,13 @@
 
     .result-row {
       border-radius: 16px;
-      background: rgba(15, 106, 115, 0.05);
-      border: 1px solid rgba(15, 106, 115, 0.08);
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.1);
     }
 
     .result-row.fail {
-      background: rgba(166, 37, 42, 0.06);
-      border-color: rgba(166, 37, 42, 0.14);
+      background: rgba(255, 122, 143, 0.08);
+      border-color: rgba(255, 122, 143, 0.16);
     }
 
     .result-top {
@@ -477,9 +562,9 @@
       margin-top: 18px;
       border-radius: 18px;
       padding: 14px 16px;
-      background: rgba(190, 77, 0, 0.1);
-      color: #7f3d11;
-      border: 1px solid rgba(190, 77, 0, 0.15);
+      background: rgba(255, 171, 82, 0.14);
+      color: #fff4d2;
+      border: 1px solid rgba(255, 204, 0, 0.18);
       display: none;
     }
 
