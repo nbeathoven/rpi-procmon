@@ -6,7 +6,7 @@
 
 ## Runtime Flow
 
-1. Load JSON config from `PROC_CONFIG_FILE`, or synthesize a legacy `ma352` monitor from the original `PROC_*` environment variables.
+1. Load canonical JSON config from `PROC_CONFIG_FILE`.
 2. Open the configured log file.
 3. Load the persisted procmon state file.
 4. Start the HTTP API server.
@@ -51,7 +51,7 @@ This lets `ma352`, `scrypted-arlo`, `homebridge-core`, or future services each c
 
 The state file is keyed by monitor id and stores the full runtime picture for each monitor:
 - current status
-- configured interval, cooldown, check count, recovery count
+- configured interval, cooldown, checks, and recovery steps
 - last and next check timestamps
 - last success and failure timestamps
 - last recovery attempt, success, and failure timestamps
@@ -72,8 +72,16 @@ The embedded HTTP API provides:
 
 ## Files
 
-- `main.go`: daemon entrypoint plus engine, checks, actions, persistence, and API
+- `main.go`: daemon entrypoint
 - `main_test.go`: core tests
+- `internal/config`: config loading and validation
+- `internal/engine`: monitor scheduler and recovery flow
+- `internal/checks`: check registry and handlers
+- `internal/actions`: recovery registry and handlers
+- `internal/state`: runtime state types and atomic storage
+- `internal/api`: HTTP status endpoints
+- `internal/command`: shell runner abstraction
+- `internal/logging`: procmon log writer
 - `configs/example.json`: example multi-monitor config
 - `systemd/rpi-procmon.service`: long-running systemd service
 - `systemd/rpi-procmon.env.example`: runtime environment example

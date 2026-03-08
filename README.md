@@ -12,12 +12,20 @@
   - `GET /status`
   - `GET /monitors`
   - `GET /monitors/{id}`
-- Supports a legacy MA352 mode when no JSON config file exists and the original `PROC_*` environment variables are set.
+- Uses one canonical JSON config model for all monitors, including `ma352`.
 
 ## Main Files
 
-- `main.go`: monitor engine, checks, recovery actions, persistence, and API server.
+- `main.go`: daemon entrypoint and top-level wiring.
 - `main_test.go`: coverage for config loading, recovery flow, and API exposure.
+- `internal/config`: config types, loading, normalization, and validation.
+- `internal/engine`: monitor scheduling, thresholds, cooldowns, and recovery orchestration.
+- `internal/checks`: built-in monitor check handlers.
+- `internal/actions`: built-in recovery action handlers.
+- `internal/state`: persisted runtime state and atomic file storage.
+- `internal/api`: embedded HTTP API server.
+- `internal/command`: shell command execution.
+- `internal/logging`: procmon log file handling.
 - `configs/example.json`: example multi-monitor configuration for `ma352` and `scrypted-arlo`.
 - `scripts/bootstrap-rpi.sh`: first-time Raspberry Pi deployment helper.
 - `scripts/install.sh`: one-line remote installer for fresh Raspberry Pi hosts.
@@ -181,6 +189,8 @@ Recovery steps currently supported:
 - `command`
 - `sleep`
 - `recheck`
+
+Config validation is strict. Invalid monitor ids, duplicate check ids, unsupported check or recovery types, missing required fields, and invalid durations fail fast at startup.
 
 ## Per-Monitor State
 

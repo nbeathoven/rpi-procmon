@@ -10,15 +10,22 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/nbeathoven/rpi-procmon/internal/api"
+	"github.com/nbeathoven/rpi-procmon/internal/command"
+	"github.com/nbeathoven/rpi-procmon/internal/config"
+	"github.com/nbeathoven/rpi-procmon/internal/engine"
+	"github.com/nbeathoven/rpi-procmon/internal/logging"
+	"github.com/nbeathoven/rpi-procmon/internal/state"
 )
 
 type fakeRunner struct {
-	responses map[string][]CommandOutcome
+	responses map[string][]command.Outcome
 	errors    map[string][]error
 	counts    map[string]int
 }
 
-func (f *fakeRunner) Run(_ context.Context, command string) (CommandOutcome, error) {
+func (f *fakeRunner) Run(_ context.Context, command string) (command.Outcome, error) {
 	if f.counts == nil {
 		f.counts = make(map[string]int)
 	}
@@ -26,7 +33,7 @@ func (f *fakeRunner) Run(_ context.Context, command string) (CommandOutcome, err
 	f.counts[command] = index + 1
 
 	outcomes := f.responses[command]
-	var outcome CommandOutcome
+	var outcome command.Outcome
 	if index < len(outcomes) {
 		outcome = outcomes[index]
 	} else if len(outcomes) > 0 {
@@ -62,9 +69,9 @@ func TestLoadConfigFromFile(t *testing.T) {
 	}
 
 	t.Setenv("PROC_CONFIG_FILE", cfgPath)
-	cfg, err := loadConfig()
+	cfg, err := config.Load()
 	if err != nil {
-		t.Fatalf("loadConfig failed: %v", err)
+		t.Fatalf("config.Load failed: %v", err)
 	}
 	if cfg.API.ListenAddress != "127.0.0.1:9900" {
 		t.Fatalf("unexpected listen address %q", cfg.API.ListenAddress)
@@ -100,9 +107,9 @@ func TestLoadConfigDeduplicatesMonitorIDs(t *testing.T) {
 	}
 
 	t.Setenv("PROC_CONFIG_FILE", cfgPath)
-	cfg, err := loadConfig()
+	cfg, err := config.Load()
 	if err != nil {
-		t.Fatalf("loadConfig failed: %v", err)
+		t.Fatalf("config.Load failed: %v", err)
 	}
 	if len(cfg.Monitors) != 1 {
 		t.Fatalf("expected one deduplicated monitor, got %d", len(cfg.Monitors))
@@ -118,7 +125,7 @@ func TestLoadConfigDeduplicatesMonitorIDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var persisted Config
+	var persisted config.Config
 	if err := json.Unmarshal(rewritten, &persisted); err != nil {
 		t.Fatalf("rewritten config is invalid JSON: %v", err)
 	}
@@ -127,26 +134,10 @@ func TestLoadConfigDeduplicatesMonitorIDs(t *testing.T) {
 	}
 }
 
-func TestLegacyConfigFallback(t *testing.T) {
-	t.Setenv("PROC_CONFIG_FILE", filepath.Join(t.TempDir(), "missing.json"))
-	t.Setenv("PROC_HEALTH_URL", "http://127.0.0.1:5000/health")
-	t.Setenv("PROC_REBOOT_ON_HEALTH_FAIL", "true")
-	cfg, err := loadConfig()
-	if err != nil {
-		t.Fatalf("loadConfig failed: %v", err)
-	}
-	if len(cfg.Monitors) != 1 {
-		t.Fatalf("expected one legacy monitor, got %d", len(cfg.Monitors))
-	}
-	if cfg.Monitors[0].ID != "ma352" {
-		t.Fatalf("unexpected legacy monitor id %q", cfg.Monitors[0].ID)
-	}
-}
-
 func TestRecoveryFlowUpdatesPerMonitorState(t *testing.T) {
 	tmpDir := t.TempDir()
 	runner := &fakeRunner{
-		responses: map[string][]CommandOutcome{
+		responses: map[string][]command.Outcome{
 			"check-service": {
 				{Output: "failed", ExitCode: 1},
 				{Output: "healthy", ExitCode: 0},
@@ -161,27 +152,27 @@ func TestRecoveryFlowUpdatesPerMonitorState(t *testing.T) {
 		},
 	}
 
-	cfg := Config{
+	cfg := config.Config{
 		ConfigFile: filepath.Join(tmpDir, "config.json"),
 		LogFile:    filepath.Join(tmpDir, "procmon.log"),
 		StateFile:  filepath.Join(tmpDir, "state.json"),
-		API: APIConfig{
+		API: config.APIConfig{
 			ListenAddress: "127.0.0.1:9645",
 		},
-		Monitors: []MonitorConfig{{
+		Monitors: []config.MonitorConfig{{
 			ID:               "svc",
 			Name:             "svc",
 			Type:             "command",
 			Interval:         "1m",
 			FailureThreshold: 1,
 			Cooldown:         "1m",
-			Checks: []CheckConfig{{
+			Checks: []config.CheckConfig{{
 				ID:      "check",
 				Name:    "check",
 				Type:    "command",
 				Command: "check-service",
 			}},
-			Recovery: []ActionConfig{{
+			Recovery: []config.ActionConfig{{
 				Name:    "restart",
 				Type:    "command",
 				Command: "restart-service",
@@ -192,18 +183,22 @@ func TestRecoveryFlowUpdatesPerMonitorState(t *testing.T) {
 		}},
 	}
 
-	logger, closeLog, err := openLog(cfg.LogFile)
+	logger, closeLog, err := logging.Open(cfg.LogFile)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer closeLog()
 
-	manager, err := newManager(cfg, logger, runner)
+	manager, err := engine.NewManager(cfg, logger, runner, "test")
 	if err != nil {
-		t.Fatalf("newManager failed: %v", err)
+		t.Fatalf("engine.NewManager failed: %v", err)
 	}
 
-	manager.runMonitorCycle(context.Background(), cfg.Monitors[0], time.Minute)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager.Start(ctx)
+
+	time.Sleep(50 * time.Millisecond)
 	monitor, ok := manager.MonitorSnapshot("svc")
 	if !ok {
 		t.Fatal("monitor state missing")
@@ -225,54 +220,83 @@ func TestRecoveryFlowUpdatesPerMonitorState(t *testing.T) {
 	}
 }
 
+func TestLoadConfigRejectsUnsupportedCheckTypes(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.json")
+	if err := os.WriteFile(cfgPath, []byte(`{
+  "monitors": [{
+    "id":"svc",
+    "interval":"1m",
+    "failure_threshold":1,
+    "cooldown":"1m",
+    "checks":[{"type":"nope"}],
+    "recovery":[{"type":"command","command":"true"}]
+  }]
+}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PROC_CONFIG_FILE", cfgPath)
+	if _, err := config.Load(); err == nil {
+		t.Fatal("expected unsupported check type to fail validation")
+	}
+}
+
 func TestStatusAPIExposesMonitorState(t *testing.T) {
 	enabled := true
-	manager := &manager{
-		cfg: Config{
-			ConfigFile: "/tmp/config.json",
-			LogFile:    "/tmp/procmon.log",
-			StateFile:  "/tmp/state.json",
-			API: APIConfig{
-				ListenAddress: "127.0.0.1:9645",
-			},
-			Monitors: []MonitorConfig{{
-				ID:               "ma352",
-				Name:             "MA352",
-				Type:             "ma352",
-				Enabled:          &enabled,
-				Interval:         "1m",
-				FailureThreshold: 1,
-				Cooldown:         "1m",
-				Checks: []CheckConfig{{
-					ID:   "health",
-					Type: "http_json",
-					URL:  "http://127.0.0.1:5000/health",
-				}},
-				Recovery: []ActionConfig{{
-					Name:    "restart",
-					Type:    "command",
-					Command: "systemctl restart ma352-bridge",
-				}},
+	cfg := config.Config{
+		ConfigFile: "/tmp/config.json",
+		LogFile:    "/tmp/procmon.log",
+		StateFile:  "/tmp/state.json",
+		API: config.APIConfig{
+			ListenAddress: "127.0.0.1:9645",
+		},
+		Monitors: []config.MonitorConfig{{
+			ID:               "ma352",
+			Name:             "MA352",
+			Type:             "ma352",
+			Enabled:          &enabled,
+			Interval:         "1m",
+			FailureThreshold: 1,
+			Cooldown:         "1m",
+			Checks: []config.CheckConfig{{
+				ID:   "health",
+				Type: "http_json",
+				URL:  "http://127.0.0.1:5000/health",
+			}},
+			Recovery: []config.ActionConfig{{
+				Name:    "restart",
+				Type:    "command",
+				Command: "systemctl restart ma352-bridge",
+			}},
+		}},
+	}
+	manager := &stubProvider{
+		snapshot: state.ProcmonStatus{
+			AppVersion:    "test",
+			OverallStatus: "healthy",
+			Monitors: []*state.MonitorRuntimeState{{
+				ID:                   "ma352",
+				Name:                 "MA352",
+				Type:                 "ma352",
+				Enabled:              true,
+				Status:               "healthy",
+				ConfiguredChecks:     []config.CheckConfig{{ID: "health", Type: "http_json", URL: "http://127.0.0.1:5000/health"}},
+				ConfiguredRecoveries: []config.ActionConfig{{Name: "restart", Type: "command", Command: "systemctl restart ma352-bridge"}},
 			}},
 		},
-		startedAt: time.Now().UTC(),
-		state: ProcmonState{
-			StartedAt: time.Now().UTC().Format(time.RFC3339),
-			Monitors: map[string]*MonitorRuntimeState{
-				"ma352": {
-					ID:                   "ma352",
-					Name:                 "MA352",
-					Type:                 "ma352",
-					Enabled:              true,
-					Status:               "healthy",
-					ConfiguredChecks:     StoredCheckConfigs{{ID: "health", Type: "http_json", URL: "http://127.0.0.1:5000/health"}},
-					ConfiguredRecoveries: StoredActions{{Name: "restart", Type: "command", Command: "systemctl restart ma352-bridge"}},
-				},
-			},
+		monitor: &state.MonitorRuntimeState{
+			ID:                   "ma352",
+			Name:                 "MA352",
+			Type:                 "ma352",
+			Enabled:              true,
+			Status:               "healthy",
+			ConfiguredChecks:     []config.CheckConfig{{ID: "health", Type: "http_json", URL: "http://127.0.0.1:5000/health"}},
+			ConfiguredRecoveries: []config.ActionConfig{{Name: "restart", Type: "command", Command: "systemctl restart ma352-bridge"}},
 		},
 	}
 
-	server := httptest.NewServer(newAPIServer(manager.cfg, manager).Handler)
+	server := httptest.NewServer(api.NewServer(cfg, manager).Handler)
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/monitors/ma352")
@@ -281,51 +305,36 @@ func TestStatusAPIExposesMonitorState(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	var state MonitorRuntimeState
-	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
+	var monitor state.MonitorRuntimeState
+	if err := json.NewDecoder(resp.Body).Decode(&monitor); err != nil {
 		t.Fatal(err)
 	}
-	if state.ID != "ma352" || state.Status != "healthy" {
-		t.Fatalf("unexpected monitor state %#v", state)
+	if monitor.ID != "ma352" || monitor.Status != "healthy" {
+		t.Fatalf("unexpected monitor state %#v", monitor)
 	}
-	if len(state.ConfiguredChecks) != 1 || state.ConfiguredChecks[0].ID != "health" {
-		t.Fatalf("expected configured checks in API response, got %#v", state.ConfiguredChecks)
+	if len(monitor.ConfiguredChecks) != 1 || monitor.ConfiguredChecks[0].ID != "health" {
+		t.Fatalf("expected configured checks in API response, got %#v", monitor.ConfiguredChecks)
 	}
-	if len(state.ConfiguredRecoveries) != 1 || state.ConfiguredRecoveries[0].Name != "restart" {
-		t.Fatalf("expected configured recoveries in API response, got %#v", state.ConfiguredRecoveries)
+	if len(monitor.ConfiguredRecoveries) != 1 || monitor.ConfiguredRecoveries[0].Name != "restart" {
+		t.Fatalf("expected configured recoveries in API response, got %#v", monitor.ConfiguredRecoveries)
 	}
 }
 
 func TestHealthAPIReportsServiceUnavailableWhenProcmonIsFailed(t *testing.T) {
-	manager := &manager{
-		cfg: Config{
-			API: APIConfig{
-				ListenAddress: "127.0.0.1:9645",
-			},
-			Monitors: []MonitorConfig{{
-				ID:       "svc",
-				Name:     "svc",
-				Type:     "command",
-				Interval: "1m",
-				Cooldown: "1m",
-			}},
+	cfg := config.Config{
+		API: config.APIConfig{
+			ListenAddress: "127.0.0.1:9645",
 		},
-		startedAt: time.Now().UTC(),
-		state: ProcmonState{
-			StartedAt: time.Now().UTC().Format(time.RFC3339),
-			Monitors: map[string]*MonitorRuntimeState{
-				"svc": {
-					ID:      "svc",
-					Name:    "svc",
-					Type:    "command",
-					Enabled: true,
-					Status:  "failed",
-				},
-			},
+	}
+	manager := &stubProvider{
+		snapshot: state.ProcmonStatus{
+			AppVersion:    "test",
+			OverallStatus: "failed",
+			MonitorCount:  1,
 		},
 	}
 
-	server := httptest.NewServer(newAPIServer(manager.cfg, manager).Handler)
+	server := httptest.NewServer(api.NewServer(cfg, manager).Handler)
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/health")
@@ -350,38 +359,18 @@ func TestHealthAPIReportsServiceUnavailableWhenProcmonIsFailed(t *testing.T) {
 	}
 }
 
-func TestReadProcmonStateAcceptsLegacyConfiguredCountFields(t *testing.T) {
-	tmpDir := t.TempDir()
-	statePath := filepath.Join(tmpDir, "state.json")
-	if err := os.WriteFile(statePath, []byte(`{
-  "version": 2,
-  "monitors": {
-    "svc": {
-      "id": "svc",
-      "name": "svc",
-      "type": "command",
-      "enabled": true,
-      "status": "healthy",
-      "configured_checks": 1,
-      "configured_recoveries": 2
-    }
-  }
-}`), 0644); err != nil {
-		t.Fatal(err)
-	}
+type stubProvider struct {
+	snapshot state.ProcmonStatus
+	monitor  *state.MonitorRuntimeState
+}
 
-	state, err := readProcmonState(statePath)
-	if err != nil {
-		t.Fatalf("readProcmonState failed: %v", err)
+func (s *stubProvider) Snapshot() state.ProcmonStatus {
+	return s.snapshot
+}
+
+func (s *stubProvider) MonitorSnapshot(id string) (*state.MonitorRuntimeState, bool) {
+	if s.monitor == nil || s.monitor.ID != id {
+		return nil, false
 	}
-	monitor := state.Monitors["svc"]
-	if monitor == nil {
-		t.Fatal("expected monitor state to be loaded")
-	}
-	if len(monitor.ConfiguredChecks) != 0 {
-		t.Fatalf("expected legacy configured_checks count to be accepted without retained entries, got %#v", monitor.ConfiguredChecks)
-	}
-	if len(monitor.ConfiguredRecoveries) != 0 {
-		t.Fatalf("expected legacy configured_recoveries count to be accepted without retained entries, got %#v", monitor.ConfiguredRecoveries)
-	}
+	return state.CloneMonitorState(s.monitor), true
 }
