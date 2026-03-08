@@ -9,12 +9,14 @@
 1. Load canonical JSON config from `PROC_CONFIG_FILE`.
 2. Open the configured log file.
 3. Load the persisted procmon state file.
-4. Start the HTTP API server.
-5. Start one goroutine per enabled monitor.
-6. For each monitor cycle:
+4. Load the persisted monitor event history.
+5. Start the HTTP API server.
+6. Start one goroutine per enabled monitor.
+7. For each monitor cycle:
    - mark the monitor as checking
    - run all configured checks
    - persist detailed check results
+   - append failure and recovery events to the history store when monitor state changes
    - if healthy, clear failure state
    - if unhealthy and threshold/cooldown permit, execute the monitor's recovery steps
    - persist recovery results and updated monitor state
@@ -69,6 +71,7 @@ The embedded HTTP API provides:
 - `/status`: global snapshot and all monitor states
 - `/monitors`: list of all monitor states
 - `/monitors/{id}`: one monitor's full state
+- `/events`: reverse-chronological monitor history for app clients
 
 ## Files
 
@@ -79,6 +82,7 @@ The embedded HTTP API provides:
 - `internal/checks`: check registry and handlers
 - `internal/actions`: recovery registry and handlers
 - `internal/state`: runtime state types and atomic storage
+- `internal/events`: persisted event history and query filtering
 - `internal/api`: HTTP status endpoints
 - `internal/command`: shell runner abstraction
 - `internal/logging`: procmon log writer

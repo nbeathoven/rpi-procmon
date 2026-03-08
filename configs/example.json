@@ -1,6 +1,8 @@
 {
   "log_file": "/var/log/rpi-procmon.log",
   "state_file": "/var/lib/rpi-procmon/state.json",
+  "events_file": "/var/lib/rpi-procmon/events.json",
+  "events_max_entries": 1000,
   "api": {
     "listen_address": "127.0.0.1:9645",
     "read_header_timeout": "5s"

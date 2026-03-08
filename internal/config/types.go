@@ -1,11 +1,13 @@
 package config
 
 type Config struct {
-	ConfigFile string          `json:"-"`
-	LogFile    string          `json:"log_file"`
-	StateFile  string          `json:"state_file"`
-	API        APIConfig       `json:"api"`
-	Monitors   []MonitorConfig `json:"monitors"`
+	ConfigFile       string          `json:"-"`
+	LogFile          string          `json:"log_file"`
+	StateFile        string          `json:"state_file"`
+	EventsFile       string          `json:"events_file"`
+	EventsMaxEntries int             `json:"events_max_entries"`
+	API              APIConfig       `json:"api"`
+	Monitors         []MonitorConfig `json:"monitors"`
 }
 
 type APIConfig struct {

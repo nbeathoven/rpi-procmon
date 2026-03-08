@@ -5,16 +5,19 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
 
 const (
-	defaultConfigFile = "/etc/rpi-procmon/config.json"
-	defaultLogFile    = "/var/log/rpi-procmon.log"
-	defaultStateFile  = "/var/lib/rpi-procmon/state.json"
-	defaultListenAddr = "127.0.0.1:9645"
-	defaultReadHeader = "5s"
+	defaultConfigFile     = "/etc/rpi-procmon/config.json"
+	defaultLogFile        = "/var/log/rpi-procmon.log"
+	defaultStateFile      = "/var/lib/rpi-procmon/state.json"
+	defaultEventsFile     = "/var/lib/rpi-procmon/events.json"
+	defaultEventsMaxCount = 1000
+	defaultListenAddr     = "127.0.0.1:9645"
+	defaultReadHeader     = "5s"
 )
 
 func Load() (Config, error) {
@@ -141,6 +144,14 @@ func applyEnvOverrides(cfg *Config) {
 	if value := strings.TrimSpace(os.Getenv("PROC_STATE_FILE")); value != "" {
 		cfg.StateFile = value
 	}
+	if value := strings.TrimSpace(os.Getenv("PROC_EVENTS_FILE")); value != "" {
+		cfg.EventsFile = value
+	}
+	if value := strings.TrimSpace(os.Getenv("PROC_EVENTS_MAX_ENTRIES")); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			cfg.EventsMaxEntries = parsed
+		}
+	}
 	if value := strings.TrimSpace(os.Getenv("PROC_API_LISTEN_ADDR")); value != "" {
 		cfg.API.ListenAddress = value
 	}
@@ -155,6 +166,12 @@ func applyDefaults(cfg *Config) {
 	}
 	if strings.TrimSpace(cfg.StateFile) == "" {
 		cfg.StateFile = defaultStateFile
+	}
+	if strings.TrimSpace(cfg.EventsFile) == "" {
+		cfg.EventsFile = defaultEventsFile
+	}
+	if cfg.EventsMaxEntries <= 0 {
+		cfg.EventsMaxEntries = defaultEventsMaxCount
 	}
 	if strings.TrimSpace(cfg.API.ListenAddress) == "" {
 		cfg.API.ListenAddress = defaultListenAddr

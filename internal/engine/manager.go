@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	"github.com/nbeathoven/rpi-procmon/internal/checks"
 	"github.com/nbeathoven/rpi-procmon/internal/command"
 	"github.com/nbeathoven/rpi-procmon/internal/config"
+	"github.com/nbeathoven/rpi-procmon/internal/events"
 	"github.com/nbeathoven/rpi-procmon/internal/logging"
 	"github.com/nbeathoven/rpi-procmon/internal/state"
 )
@@ -20,17 +22,24 @@ type Manager struct {
 	logger     io.Writer
 	runner     command.Runner
 	store      state.Store
+	eventStore events.Store
 	startedAt  time.Time
 	appVersion string
 
-	mu      sync.RWMutex
-	current state.ProcmonState
+	mu           sync.RWMutex
+	current      state.ProcmonState
+	eventHistory events.History
 }
 
 func NewManager(cfg config.Config, logger io.Writer, runner command.Runner, appVersion string) (*Manager, error) {
 	startedAt := time.Now().UTC()
 	store := state.FileStore{Path: cfg.StateFile}
+	eventStore := events.FileStore{Path: cfg.EventsFile, MaxEntries: cfg.EventsMaxEntries}
 	snapshot, err := store.Load()
+	if err != nil {
+		return nil, err
+	}
+	eventHistory, err := eventStore.Load()
 	if err != nil {
 		return nil, err
 	}
@@ -46,9 +55,11 @@ func NewManager(cfg config.Config, logger io.Writer, runner command.Runner, appV
 		logger:     logger,
 		runner:     runner,
 		store:      store,
+		eventStore: eventStore,
 		startedAt:  startedAt,
 		appVersion: appVersion,
 		current:    snapshot,
+		eventHistory: eventHistory,
 	}
 
 	manager.mu.Lock()
@@ -130,6 +141,7 @@ func (m *Manager) Snapshot() state.ProcmonStatus {
 		DisabledCount:   disabled,
 		ConfigFile:      m.cfg.ConfigFile,
 		StateFile:       m.cfg.StateFile,
+		EventsFile:      m.cfg.EventsFile,
 		LogFile:         m.cfg.LogFile,
 		ListenAddress:   m.cfg.API.ListenAddress,
 		LastUpdatedAt:   m.current.LastUpdatedAt,
@@ -145,6 +157,41 @@ func (m *Manager) MonitorSnapshot(id string) (*state.MonitorRuntimeState, bool) 
 		return nil, false
 	}
 	return state.CloneMonitorState(monitorState), true
+}
+
+func (m *Manager) EventsSnapshot(filter events.Filter) []events.Event {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 500 {
+		limit = 500
+	}
+
+	result := make([]events.Event, 0, limit)
+	for i := len(m.eventHistory.Events) - 1; i >= 0; i-- {
+		event := m.eventHistory.Events[i]
+		if filter.MonitorID != "" && event.MonitorID != filter.MonitorID {
+			continue
+		}
+		if filter.EventType != "" && event.EventType != filter.EventType {
+			continue
+		}
+		if !filter.Since.IsZero() {
+			timestamp, err := time.Parse(time.RFC3339, event.Timestamp)
+			if err != nil || timestamp.Before(filter.Since) {
+				continue
+			}
+		}
+		result = append(result, events.CloneEvent(event))
+		if len(result) >= limit {
+			break
+		}
+	}
+	return result
 }
 
 func (m *Manager) runMonitorLoop(ctx context.Context, monitor config.MonitorConfig) {
@@ -166,9 +213,11 @@ func (m *Manager) runMonitorLoop(ctx context.Context, monitor config.MonitorConf
 
 func (m *Manager) runMonitorCycle(ctx context.Context, monitor config.MonitorConfig, interval time.Duration) {
 	start := time.Now().UTC()
+	statusBeforeCheck := ""
 
 	m.mu.Lock()
 	monitorState := m.ensureMonitorStateLocked(monitor)
+	statusBeforeCheck = monitorState.Status
 	monitorState.Status = "checking"
 	monitorState.LastCheckStartedAt = start.Format(time.RFC3339)
 	monitorState.NextCheckAt = start.Add(interval).Format(time.RFC3339)
@@ -193,6 +242,19 @@ func (m *Manager) runMonitorCycle(ctx context.Context, monitor config.MonitorCon
 		monitorState.LastSuccessAt = finished.Format(time.RFC3339)
 		monitorState.LastError = ""
 		monitorState.LastFailureReasons = nil
+		if shouldRecordHealthyEvent(statusBeforeCheck) {
+			m.appendEventLocked(events.Event{
+				ID:          eventID(monitor.ID, finished),
+				Timestamp:   finished.Format(time.RFC3339),
+				MonitorID:   monitor.ID,
+				MonitorName: monitor.Name,
+				MonitorType: monitor.Type,
+				EventType:   "check_succeeded",
+				StatusBefore: statusBeforeCheck,
+				StatusAfter: "healthy",
+				CheckResults: results,
+			})
+		}
 		m.persistOrLogLocked()
 		m.mu.Unlock()
 		logging.Logf(m.logger, "monitor check ok: id=%s type=%s duration_ms=%d checks=%d", monitor.ID, monitor.Type, durationMS, len(results))
@@ -207,6 +269,19 @@ func (m *Manager) runMonitorCycle(ctx context.Context, monitor config.MonitorCon
 	monitorState.LastFailureReasons = append([]string(nil), reasons...)
 	shouldRecover := monitorState.ConsecutiveFailures >= monitor.FailureThreshold && !cooldownActive(monitorState.CooldownUntil, finished)
 	consecutiveFailures := monitorState.ConsecutiveFailures
+	m.appendEventLocked(events.Event{
+		ID:                  eventID(monitor.ID, finished),
+		Timestamp:           finished.Format(time.RFC3339),
+		MonitorID:           monitor.ID,
+		MonitorName:         monitor.Name,
+		MonitorType:         monitor.Type,
+		EventType:           "check_failed",
+		StatusBefore:        statusBeforeCheck,
+		StatusAfter:         "degraded",
+		Reason:              joinReasons(reasons),
+		ConsecutiveFailures: monitorState.ConsecutiveFailures,
+		CheckResults:        results,
+	})
 	m.persistOrLogLocked()
 	m.mu.Unlock()
 
@@ -216,7 +291,7 @@ func (m *Manager) runMonitorCycle(ctx context.Context, monitor config.MonitorCon
 		return
 	}
 
-	actionResults, recovered, postResults, postReasons := m.executeRecovery(ctx, monitor)
+	actionResults, recovered, postResults, postReasons := m.executeRecovery(ctx, monitor, results, reasons)
 
 	m.mu.Lock()
 	monitorState = m.ensureMonitorStateLocked(monitor)
@@ -234,6 +309,19 @@ func (m *Manager) runMonitorCycle(ctx context.Context, monitor config.MonitorCon
 		if len(postResults) > 0 {
 			monitorState.LastCheckResults = state.CloneCheckResults(postResults)
 		}
+		m.appendEventLocked(events.Event{
+			ID:              eventID(monitor.ID, now),
+			Timestamp:       now.Format(time.RFC3339),
+			MonitorID:       monitor.ID,
+			MonitorName:     monitor.Name,
+			MonitorType:     monitor.Type,
+			EventType:       "recovery_succeeded",
+			StatusBefore:    "recovering",
+			StatusAfter:     "healthy",
+			RecoveryCount:   monitorState.RecoveryCount,
+			CheckResults:    postResults,
+			RecoveryResults: actionResults,
+		})
 	} else {
 		monitorState.Status = "failed"
 		monitorState.RecoveryFailureCount++
@@ -245,6 +333,21 @@ func (m *Manager) runMonitorCycle(ctx context.Context, monitor config.MonitorCon
 			monitorState.LastError = joinReasons(postReasons)
 			monitorState.LastFailureReasons = append([]string(nil), postReasons...)
 		}
+		m.appendEventLocked(events.Event{
+			ID:                  eventID(monitor.ID, now),
+			Timestamp:           now.Format(time.RFC3339),
+			MonitorID:           monitor.ID,
+			MonitorName:         monitor.Name,
+			MonitorType:         monitor.Type,
+			EventType:           "recovery_failed",
+			StatusBefore:        "recovering",
+			StatusAfter:         "failed",
+			Reason:              joinReasons(postReasons),
+			ConsecutiveFailures: monitorState.ConsecutiveFailures,
+			RecoveryCount:       monitorState.RecoveryCount,
+			CheckResults:        postResults,
+			RecoveryResults:     actionResults,
+		})
 	}
 	m.persistOrLogLocked()
 	m.mu.Unlock()
@@ -273,13 +376,27 @@ func (m *Manager) evaluateMonitor(ctx context.Context, monitor config.MonitorCon
 	return results, reasons
 }
 
-func (m *Manager) executeRecovery(ctx context.Context, monitor config.MonitorConfig) ([]state.ActionResult, bool, []state.CheckResult, []string) {
+func (m *Manager) executeRecovery(ctx context.Context, monitor config.MonitorConfig, failureResults []state.CheckResult, failureReasons []string) ([]state.ActionResult, bool, []state.CheckResult, []string) {
 	results := make([]state.ActionResult, 0, len(monitor.Recovery))
 
 	m.mu.Lock()
 	monitorState := m.ensureMonitorStateLocked(monitor)
 	monitorState.Status = "recovering"
-	monitorState.LastRecoveryAttemptAt = time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC()
+	monitorState.LastRecoveryAttemptAt = now.Format(time.RFC3339)
+	m.appendEventLocked(events.Event{
+		ID:                  eventID(monitor.ID, now),
+		Timestamp:           now.Format(time.RFC3339),
+		MonitorID:           monitor.ID,
+		MonitorName:         monitor.Name,
+		MonitorType:         monitor.Type,
+		EventType:           "recovery_started",
+		StatusBefore:        "degraded",
+		StatusAfter:         "recovering",
+		Reason:              joinReasons(failureReasons),
+		ConsecutiveFailures: monitorState.ConsecutiveFailures,
+		CheckResults:        failureResults,
+	})
 	m.persistOrLogLocked()
 	m.mu.Unlock()
 	logging.Logf(m.logger, "monitor recovery start: id=%s actions=%d", monitor.ID, len(monitor.Recovery))
@@ -347,7 +464,23 @@ func (m *Manager) persistLocked() error {
 	m.current.Version = state.SchemaVersion
 	m.current.AppVersion = m.appVersion
 	m.current.LastUpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	return m.store.Save(m.current)
+	if err := m.store.Save(m.current); err != nil {
+		return err
+	}
+	m.eventHistory.Version = events.SchemaVersion
+	return m.eventStore.Save(m.eventHistory)
+}
+
+func (m *Manager) appendEventLocked(event events.Event) {
+	event.CheckResults = state.CloneCheckResults(event.CheckResults)
+	event.RecoveryResults = state.CloneActionResults(event.RecoveryResults)
+	m.eventHistory.Events = append(m.eventHistory.Events, event)
+	if limit := m.cfg.EventsMaxEntries; limit > 0 && len(m.eventHistory.Events) > limit {
+		start := len(m.eventHistory.Events) - limit
+		trimmed := make([]events.Event, limit)
+		copy(trimmed, m.eventHistory.Events[start:])
+		m.eventHistory.Events = trimmed
+	}
 }
 
 func parseDuration(value string, def time.Duration) time.Duration {
@@ -411,4 +544,17 @@ func cloneActionConfigs(in []config.ActionConfig) []config.ActionConfig {
 	out := make([]config.ActionConfig, len(in))
 	copy(out, in)
 	return out
+}
+
+func shouldRecordHealthyEvent(statusBefore string) bool {
+	switch statusBefore {
+	case "degraded", "failed", "recovering":
+		return true
+	default:
+		return false
+	}
+}
+
+func eventID(monitorID string, timestamp time.Time) string {
+	return fmt.Sprintf("%s-%d", monitorID, timestamp.UTC().UnixNano())
 }

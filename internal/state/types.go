@@ -82,6 +82,7 @@ type ProcmonStatus struct {
 	DisabledCount   int                    `json:"disabled_count"`
 	ConfigFile      string                 `json:"config_file"`
 	StateFile       string                 `json:"state_file"`
+	EventsFile      string                 `json:"events_file"`
 	LogFile         string                 `json:"log_file"`
 	ListenAddress   string                 `json:"listen_address"`
 	LastUpdatedAt   string                 `json:"last_updated_at"`

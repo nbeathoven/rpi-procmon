@@ -3,16 +3,19 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/nbeathoven/rpi-procmon/internal/config"
+	"github.com/nbeathoven/rpi-procmon/internal/events"
 	"github.com/nbeathoven/rpi-procmon/internal/state"
 )
 
 type SnapshotProvider interface {
 	Snapshot() state.ProcmonStatus
 	MonitorSnapshot(id string) (*state.MonitorRuntimeState, bool)
+	EventsSnapshot(events.Filter) []events.Event
 }
 
 func NewServer(cfg config.Config, provider SnapshotProvider) *http.Server {
@@ -36,6 +39,22 @@ func NewServer(cfg config.Config, provider SnapshotProvider) *http.Server {
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, provider.Snapshot())
 	})
+	mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
+		filter, err := parseEventFilter(r)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		result := provider.EventsSnapshot(filter)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"events":      result,
+			"returned":    len(result),
+			"monitor_id":  filter.MonitorID,
+			"event_type":  filter.EventType,
+			"limit":       normalizeEventLimit(filter.Limit),
+			"since":       formatFilterSince(filter.Since),
+		})
+	})
 	mux.HandleFunc("/monitors", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, provider.Snapshot().Monitors)
 	})
@@ -58,6 +77,47 @@ func NewServer(cfg config.Config, provider SnapshotProvider) *http.Server {
 		Handler:           mux,
 		ReadHeaderTimeout: parseDuration(cfg.API.ReadHeaderTimeout, 5*time.Second),
 	}
+}
+
+func parseEventFilter(r *http.Request) (events.Filter, error) {
+	query := r.URL.Query()
+	filter := events.Filter{
+		MonitorID: strings.TrimSpace(query.Get("monitor_id")),
+		EventType: strings.TrimSpace(query.Get("event_type")),
+		Limit:     normalizeEventLimit(0),
+	}
+	if value := strings.TrimSpace(query.Get("limit")); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return events.Filter{}, err
+		}
+		filter.Limit = normalizeEventLimit(parsed)
+	}
+	if value := strings.TrimSpace(query.Get("since")); value != "" {
+		parsed, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			return events.Filter{}, err
+		}
+		filter.Since = parsed
+	}
+	return filter, nil
+}
+
+func normalizeEventLimit(limit int) int {
+	if limit <= 0 {
+		return 50
+	}
+	if limit > 500 {
+		return 500
+	}
+	return limit
+}
+
+func formatFilterSince(since time.Time) string {
+	if since.IsZero() {
+		return ""
+	}
+	return since.UTC().Format(time.RFC3339)
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

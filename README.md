@@ -7,11 +7,13 @@
 - Runs multiple monitors in one process.
 - Supports service-specific checks such as HTTP health, Docker container state, Docker log pattern matching, command checks, system load, memory, I/O pressure, and file path access.
 - Persists per-monitor runtime state including last check times, last failures, last recoveries, cooldowns, counters, and detailed check/action results.
+- Persists a queryable event history for failures and recovery actions so external apps can pull recent monitor activity without scraping logs.
 - Exposes API endpoints for external apps:
   - `GET /health`
   - `GET /status`
   - `GET /monitors`
   - `GET /monitors/{id}`
+  - `GET /events`
 - Uses one canonical JSON config model for all monitors, including `ma352`.
 
 ## Main Files
@@ -192,6 +194,10 @@ Recovery steps currently supported:
 
 Config validation is strict. Invalid monitor ids, duplicate check ids, unsupported check or recovery types, missing required fields, and invalid durations fail fast at startup.
 
+History defaults:
+- `events_file`: `/var/lib/rpi-procmon/events.json`
+- `events_max_entries`: `1000`
+
 ## Per-Monitor State
 
 The state file stores everything the daemon tracks for each monitor, including:
@@ -208,6 +214,38 @@ The state file stores everything the daemon tracks for each monitor, including:
 - last error and failure reasons
 - last check results with observations
 - last recovery action results with command output
+
+## Events API
+
+`GET /events` exposes recent monitor history for external apps.
+
+Supported query parameters:
+- `monitor_id`
+- `event_type`
+- `since` as RFC3339 UTC timestamp
+- `limit`
+
+Examples:
+
+```bash
+curl http://127.0.0.1:9645/events
+curl 'http://127.0.0.1:9645/events?monitor_id=scrypted-arlo&limit=20'
+curl 'http://127.0.0.1:9645/events?since=2026-03-08T00:00:00Z'
+```
+
+Event payloads include:
+- `timestamp`
+- `monitor_id`
+- `monitor_name`
+- `monitor_type`
+- `event_type`
+- `status_before`
+- `status_after`
+- `reason`
+- `consecutive_failures`
+- `recovery_count`
+- `check_results`
+- `recovery_results`
 
 ## Test
 
