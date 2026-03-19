@@ -34,6 +34,7 @@ var registry = map[string]Handler{
 	"docker_container":   runDockerContainer,
 	"docker_log_pattern": runDockerLogPattern,
 	"command":            runCommand,
+	"systemd_service":    runSystemdService,
 }
 
 type healthResponse struct {
@@ -330,6 +331,25 @@ func runCommand(ctx context.Context, runner command.Runner, _ config.MonitorConf
 	return true, "", observations
 }
 
+func runSystemdService(ctx context.Context, runner command.Runner, monitor config.MonitorConfig, check config.CheckConfig) (bool, string, map[string]any) {
+	service := strings.TrimSpace(check.Service)
+	if service == "" {
+		return false, "systemd_service check missing service", nil
+	}
+	cmd := command.BuildSystemdIsActiveCommand(monitor.Target, service)
+	outcome, err := runner.Run(ctx, cmd)
+	observations := map[string]any{
+		"service":   service,
+		"transport": normalizedTransport(monitor.Target.Transport),
+		"host":      strings.TrimSpace(monitor.Target.Host),
+		"exit_code": outcome.ExitCode,
+	}
+	if err != nil || outcome.ExitCode != 0 {
+		return false, fmt.Sprintf("systemd service %s is not active", service), observations
+	}
+	return true, "", observations
+}
+
 func parseDuration(value string, def time.Duration) time.Duration {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
@@ -577,4 +597,12 @@ func limitString(value string, max int) string {
 
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func normalizedTransport(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "local"
+	}
+	return trimmed
 }

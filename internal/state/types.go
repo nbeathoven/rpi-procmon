@@ -21,6 +21,7 @@ type MonitorRuntimeState struct {
 	Interval              string                `json:"interval"`
 	FailureThreshold      int                   `json:"failure_threshold"`
 	Cooldown              string                `json:"cooldown"`
+	Target                config.TargetConfig   `json:"target,omitempty"`
 	Metadata              map[string]string     `json:"metadata,omitempty"`
 	ConfiguredChecks      []config.CheckConfig  `json:"configured_checks"`
 	ConfiguredRecoveries  []config.ActionConfig `json:"configured_recoveries"`
@@ -94,6 +95,7 @@ func CloneMonitorState(in *MonitorRuntimeState) *MonitorRuntimeState {
 		return nil
 	}
 	out := *in
+	out.Target = in.Target
 	out.Metadata = cloneStringMap(in.Metadata)
 	out.ConfiguredChecks = cloneCheckConfigs(in.ConfiguredChecks)
 	out.ConfiguredRecoveries = cloneActionConfigs(in.ConfiguredRecoveries)

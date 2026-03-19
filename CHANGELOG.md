@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 - App revision updated to `eddc6bb`.
+- Add a target-aware monitor model with `local` and `ssh` transports so one procmon instance can monitor and recover remote systemd services such as `ma352-bridge`.
+- Add typed `systemd_service` checks and `restart_systemd_service` recovery actions instead of relying on raw shell snippets for service control.
+- Extend bootstrap so `MA352` and generic systemd service monitors can be configured for local or remote SSH-backed service control.
+- Persist and expose per-monitor target metadata in procmon state and API responses for external dashboards and app clients.
 
 - Fix bootstrap post-install status parsing so procmon API JSON is read correctly and no traceback is printed on successful installs.
 - Bootstrap now reuses an existing compatible Go toolchain and only installs Go when it is missing or too old for the repo `go.mod` requirement.

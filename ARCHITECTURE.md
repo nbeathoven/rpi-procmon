@@ -25,12 +25,13 @@
 
 Each monitor has its own:
 - identity: `id`, `name`, `type`
+- target: `target.transport`, `target.host`, `target.user`, `target.port`
 - schedule: `interval`
 - policy: `failure_threshold`, `cooldown`
 - `checks[]`
 - `recovery[]`
 
-This lets `ma352`, `scrypted-arlo`, `homebridge-core`, or future services each carry their own logic while sharing one engine.
+This lets `ma352`, `scrypted-arlo`, `homebridge-core`, or future services each carry their own logic while sharing one engine. The target model keeps local and remote service control explicit without turning procmon into a distributed controller mesh.
 
 ## Current Check Types
 
@@ -42,12 +43,14 @@ This lets `ma352`, `scrypted-arlo`, `homebridge-core`, or future services each c
 - `docker_container`
 - `docker_log_pattern`
 - `command`
+- `systemd_service`
 
 ## Current Recovery Step Types
 
 - `command`
 - `sleep`
 - `recheck`
+- `restart_systemd_service`
 
 ## State Model
 
@@ -72,6 +75,8 @@ The embedded HTTP API provides:
 - `/monitors`: list of all monitor states
 - `/monitors/{id}`: one monitor's full state
 - `/events`: reverse-chronological monitor history for app clients
+
+Per-monitor API responses include the configured `target` object so external apps can distinguish local services from remotely managed ones.
 
 ## Files
 

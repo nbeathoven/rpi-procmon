@@ -15,12 +15,35 @@ var supportedCheckTypes = map[string]struct{}{
 	"docker_container":   {},
 	"docker_log_pattern": {},
 	"command":            {},
+	"systemd_service":    {},
 }
 
 var supportedActionTypes = map[string]struct{}{
-	"command": {},
-	"sleep":   {},
-	"recheck": {},
+	"command":                 {},
+	"sleep":                   {},
+	"recheck":                 {},
+	"restart_systemd_service": {},
+}
+
+func validateTarget(monitorID string, target TargetConfig) error {
+	transport := strings.TrimSpace(target.Transport)
+	if transport == "" {
+		transport = "local"
+	}
+	switch transport {
+	case "local":
+		return nil
+	case "ssh":
+		if strings.TrimSpace(target.Host) == "" {
+			return fmt.Errorf("monitor %q target with transport ssh missing host", monitorID)
+		}
+		if target.Port < 0 {
+			return fmt.Errorf("monitor %q target port %d is invalid", monitorID, target.Port)
+		}
+		return nil
+	default:
+		return fmt.Errorf("monitor %q has unsupported target transport %q", monitorID, target.Transport)
+	}
 }
 
 func validateCheck(monitorID string, check CheckConfig) error {
@@ -62,6 +85,10 @@ func validateCheck(monitorID string, check CheckConfig) error {
 		if strings.TrimSpace(check.Command) == "" {
 			return fmt.Errorf("monitor %q check %q missing command", monitorID, check.ID)
 		}
+	case "systemd_service":
+		if strings.TrimSpace(check.Service) == "" {
+			return fmt.Errorf("monitor %q check %q missing service", monitorID, check.ID)
+		}
 	}
 
 	return nil
@@ -76,6 +103,10 @@ func validateAction(monitorID string, action ActionConfig) error {
 	case "command":
 		if strings.TrimSpace(action.Command) == "" {
 			return fmt.Errorf("monitor %q recovery action %q missing command", monitorID, action.Name)
+		}
+	case "restart_systemd_service":
+		if strings.TrimSpace(action.Service) == "" {
+			return fmt.Errorf("monitor %q recovery action %q missing service", monitorID, action.Name)
 		}
 	case "sleep":
 		if strings.TrimSpace(action.Duration) == "" {

@@ -147,24 +147,36 @@ def normalize(value):
 
 def monitor_target_keys(monitor):
     keys = []
+    target = monitor.get("target") or {}
+    transport = normalize(target.get("transport")) or "local"
+    host = normalize(target.get("host"))
     metadata = monitor.get("metadata") or {}
     service_name = normalize(metadata.get("service_name"))
     if not service_name:
         for check in monitor.get("checks", []) or []:
-            if normalize(check.get("type")) != "command":
-                continue
-            command = normalize(check.get("command"))
-            prefix = "systemctl is-active --quiet "
-            if command.startswith(prefix):
-                service_name = command[len(prefix):].strip()
+            check_type = normalize(check.get("type"))
+            if check_type == "systemd_service":
+                service_name = normalize(check.get("service"))
                 break
+            if check_type == "command":
+                command = normalize(check.get("command"))
+                prefix = "systemctl is-active --quiet "
+                if command.startswith(prefix):
+                    service_name = command[len(prefix):].strip()
+                    break
     if service_name:
-        keys.append(f"systemd-service:{service_name}")
+        keys.append(f"systemd-service:{transport}:{host}:{service_name}")
     return keys
 
 def describe_target(key):
-    kind, _, value = key.partition(":")
+    parts = key.split(":", 3)
+    kind = parts[0]
     if kind == "systemd-service":
+        transport = parts[1] if len(parts) > 1 else "local"
+        host = parts[2] if len(parts) > 2 else ""
+        value = parts[3] if len(parts) > 3 else ""
+        if transport == "ssh" and host:
+            return f"systemd service {value} on {host}"
         return f"systemd service {value}"
     return key
 
@@ -207,6 +219,13 @@ def upsert(monitor):
 
 template = os.environ["PROC_TEMPLATE"]
 if template == "ma352":
+    target = {
+        "transport": os.environ.get("PROC_TARGET_TRANSPORT", "local"),
+        "host": os.environ.get("PROC_TARGET_HOST", ""),
+        "user": os.environ.get("PROC_TARGET_USER", ""),
+        "port": int(os.environ.get("PROC_TARGET_PORT", "0") or "0"),
+        "identity_file": os.environ.get("PROC_TARGET_IDENTITY_FILE", ""),
+    }
     monitor = {
         "id": "ma352",
         "name": "MA352 Bridge",
@@ -214,6 +233,7 @@ if template == "ma352":
         "interval": os.environ["PROC_INTERVAL"],
         "failure_threshold": 1,
         "cooldown": os.environ["PROC_COOLDOWN"],
+        "target": target,
         "metadata": {
             "repo_path": os.environ.get("PROC_REPO_PATH", ""),
             "service_name": os.environ["PROC_SERVICE_NAME"],
@@ -221,8 +241,8 @@ if template == "ma352":
         "checks": [
             {
                 "id": "ma352-service-active",
-                "type": "command",
-                "command": f"systemctl is-active --quiet {os.environ['PROC_SERVICE_NAME']}",
+                "type": "systemd_service",
+                "service": os.environ["PROC_SERVICE_NAME"],
             },
             {
                 "id": "ma352-health",
@@ -236,8 +256,8 @@ if template == "ma352":
         "recovery": [
             {
                 "name": "restart-ma352-bridge",
-                "type": "command",
-                "command": f"systemctl restart {os.environ['PROC_SERVICE_NAME']}",
+                "type": "restart_systemd_service",
+                "service": os.environ["PROC_SERVICE_NAME"],
             },
             {
                 "name": "wait-after-restart",
@@ -318,11 +338,18 @@ elif template == "scrypted_arlo":
     }
     upsert(monitor)
 elif template == "systemd_service":
+    target = {
+        "transport": os.environ.get("PROC_TARGET_TRANSPORT", "local"),
+        "host": os.environ.get("PROC_TARGET_HOST", ""),
+        "user": os.environ.get("PROC_TARGET_USER", ""),
+        "port": int(os.environ.get("PROC_TARGET_PORT", "0") or "0"),
+        "identity_file": os.environ.get("PROC_TARGET_IDENTITY_FILE", ""),
+    }
     checks = [
         {
             "id": f"{os.environ['PROC_MONITOR_ID']}-service-active",
-            "type": "command",
-            "command": f"systemctl is-active --quiet {os.environ['PROC_SERVICE_NAME']}",
+            "type": "systemd_service",
+            "service": os.environ["PROC_SERVICE_NAME"],
         }
     ]
     health_url = os.environ.get("PROC_HEALTH_URL", "").strip()
@@ -341,6 +368,7 @@ elif template == "systemd_service":
         "interval": os.environ["PROC_INTERVAL"],
         "failure_threshold": 1,
         "cooldown": os.environ["PROC_COOLDOWN"],
+        "target": target,
         "metadata": {
             "service_name": os.environ["PROC_SERVICE_NAME"],
         },
@@ -348,8 +376,8 @@ elif template == "systemd_service":
         "recovery": [
             {
                 "name": f"restart-{os.environ['PROC_MONITOR_ID']}",
-                "type": "command",
-                "command": f"systemctl restart {os.environ['PROC_SERVICE_NAME']}",
+                "type": "restart_systemd_service",
+                "service": os.environ["PROC_SERVICE_NAME"],
             },
             {
                 "name": "wait-after-restart",
@@ -389,24 +417,36 @@ def normalize(value):
 
 def monitor_target_keys(monitor):
     keys = []
+    target = monitor.get("target") or {}
+    transport = normalize(target.get("transport")) or "local"
+    host = normalize(target.get("host"))
     metadata = monitor.get("metadata") or {}
     service_name = normalize(metadata.get("service_name"))
     if not service_name:
         for check in monitor.get("checks", []) or []:
-            if normalize(check.get("type")) != "command":
-                continue
-            command = normalize(check.get("command"))
-            prefix = "systemctl is-active --quiet "
-            if command.startswith(prefix):
-                service_name = command[len(prefix):].strip()
+            check_type = normalize(check.get("type"))
+            if check_type == "systemd_service":
+                service_name = normalize(check.get("service"))
                 break
+            if check_type == "command":
+                command = normalize(check.get("command"))
+                prefix = "systemctl is-active --quiet "
+                if command.startswith(prefix):
+                    service_name = command[len(prefix):].strip()
+                    break
     if service_name:
-        keys.append(f"systemd-service:{service_name}")
+        keys.append(f"systemd-service:{transport}:{host}:{service_name}")
     return keys
 
 def describe_target(key):
-    kind, _, value = key.partition(":")
+    parts = key.split(":", 3)
+    kind = parts[0]
     if kind == "systemd-service":
+        transport = parts[1] if len(parts) > 1 else "local"
+        host = parts[2] if len(parts) > 2 else ""
+        value = parts[3] if len(parts) > 3 else ""
+        if transport == "ssh" and host:
+            return f"systemd service {value} on {host}"
         return f"systemd service {value}"
     return key
 
@@ -677,15 +717,45 @@ EOF_ENV
 
 add_ma352_monitor() {
   local detected_repo repo_path service_name health_url interval cooldown
+  local service_host target_transport ssh_user ssh_port ssh_identity_file default_health_host
   detected_repo="$(detect_ma352_repo)"
   repo_path="$(prompt_default "MA352 repo path (homebridge-mcintosh-rs232)" "${detected_repo:-/opt/homebridge-mcintosh-rs232}")"
+  service_host="$(prompt_default "MA352 host/IP" "127.0.0.1")"
+  if [[ "$service_host" == "127.0.0.1" || "$service_host" == "localhost" ]]; then
+    target_transport="local"
+  else
+    target_transport="ssh"
+  fi
+  target_transport="$(prompt_default "MA352 service control transport (local or ssh)" "$target_transport")"
+  target_transport="$(printf '%s' "$target_transport" | tr '[:upper:]' '[:lower:]')"
+  ssh_user=""
+  ssh_port="22"
+  ssh_identity_file=""
+  if [[ "$target_transport" == "ssh" ]]; then
+    ssh_user="$(prompt_default "MA352 SSH user" "nima")"
+    ssh_port="$(prompt_default "MA352 SSH port" "22")"
+    ssh_identity_file="$(prompt_default "MA352 SSH identity file on procmon host" "/home/nima/.ssh/id_ed25519")"
+  fi
   service_name="$(prompt_default "MA352 bridge systemd service name" "ma352-bridge")"
-  health_url="$(prompt_default "MA352 health URL" "http://127.0.0.1:5000/health")"
+  default_health_host="$service_host"
+  if [[ "$default_health_host" == "localhost" ]]; then
+    default_health_host="127.0.0.1"
+  fi
+  health_url="$(prompt_default "MA352 health URL" "http://${default_health_host}:5000/health")"
   interval="$(prompt_default "MA352 check interval" "1m")"
   cooldown="$(prompt_default "MA352 recovery cooldown" "15m")"
 
   export PROC_TEMPLATE="ma352"
   export PROC_REPO_PATH="$repo_path"
+  export PROC_TARGET_TRANSPORT="$target_transport"
+  if [[ "$target_transport" == "ssh" ]]; then
+    export PROC_TARGET_HOST="$service_host"
+  else
+    export PROC_TARGET_HOST=""
+  fi
+  export PROC_TARGET_USER="$ssh_user"
+  export PROC_TARGET_PORT="$ssh_port"
+  export PROC_TARGET_IDENTITY_FILE="$ssh_identity_file"
   export PROC_SERVICE_NAME="$service_name"
   export PROC_HEALTH_URL="$health_url"
   export PROC_INTERVAL="$interval"
@@ -735,9 +805,26 @@ add_scrypted_arlo_monitor() {
 
 add_systemd_service_monitor() {
   local monitor_id monitor_name service_name health_url interval cooldown
+  local service_host target_transport ssh_user ssh_port ssh_identity_file
   service_name="$(prompt_required "Systemd service name to monitor")"
   monitor_id="$(prompt_default "Custom monitor id" "$service_name")"
   monitor_name="$(prompt_default "Custom monitor name" "$monitor_id")"
+  service_host="$(prompt_default "Target host/IP for service control" "127.0.0.1")"
+  if [[ "$service_host" == "127.0.0.1" || "$service_host" == "localhost" ]]; then
+    target_transport="local"
+  else
+    target_transport="ssh"
+  fi
+  target_transport="$(prompt_default "Service control transport (local or ssh)" "$target_transport")"
+  target_transport="$(printf '%s' "$target_transport" | tr '[:upper:]' '[:lower:]')"
+  ssh_user=""
+  ssh_port="22"
+  ssh_identity_file=""
+  if [[ "$target_transport" == "ssh" ]]; then
+    ssh_user="$(prompt_default "SSH user" "nima")"
+    ssh_port="$(prompt_default "SSH port" "22")"
+    ssh_identity_file="$(prompt_default "SSH identity file on procmon host" "/home/nima/.ssh/id_ed25519")"
+  fi
   health_url="$(prompt_default "Optional health URL (leave blank for none)" "")"
   interval="$(prompt_default "Custom service check interval" "1m")"
   cooldown="$(prompt_default "Custom service recovery cooldown" "10m")"
@@ -746,6 +833,15 @@ add_systemd_service_monitor() {
   export PROC_MONITOR_ID="$monitor_id"
   export PROC_MONITOR_NAME="$monitor_name"
   export PROC_SERVICE_NAME="$service_name"
+  export PROC_TARGET_TRANSPORT="$target_transport"
+  if [[ "$target_transport" == "ssh" ]]; then
+    export PROC_TARGET_HOST="$service_host"
+  else
+    export PROC_TARGET_HOST=""
+  fi
+  export PROC_TARGET_USER="$ssh_user"
+  export PROC_TARGET_PORT="$ssh_port"
+  export PROC_TARGET_IDENTITY_FILE="$ssh_identity_file"
   export PROC_HEALTH_URL="$health_url"
   export PROC_INTERVAL="$interval"
   export PROC_COOLDOWN="$cooldown"

@@ -262,6 +262,166 @@ func TestLoadConfigRejectsUnsupportedCheckTypes(t *testing.T) {
 	}
 }
 
+func TestLoadConfigSupportsSSHTargetAndSystemdTypes(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.json")
+	if err := os.WriteFile(cfgPath, []byte(`{
+  "monitors": [{
+    "id":"ma352",
+    "name":"MA352 Bridge",
+    "type":"systemd-service",
+    "interval":"1m",
+    "failure_threshold":1,
+    "cooldown":"15m",
+    "target":{"transport":"ssh","host":"192.168.5.163","user":"nima","port":22,"identity_file":"/home/nima/.ssh/id_ed25519"},
+    "checks":[
+      {"id":"svc","type":"systemd_service","service":"ma352-bridge"},
+      {"id":"health","type":"http_json","url":"http://192.168.5.163:5000/health","require_ok":true,"require_serial_connected":true}
+    ],
+    "recovery":[
+      {"name":"restart","type":"restart_systemd_service","service":"ma352-bridge"},
+      {"name":"recheck","type":"recheck"}
+    ]
+  }]
+}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PROC_CONFIG_FILE", cfgPath)
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load failed: %v", err)
+	}
+
+	monitor := cfg.Monitors[0]
+	if monitor.Target.Transport != "ssh" || monitor.Target.Host != "192.168.5.163" {
+		t.Fatalf("unexpected target %#v", monitor.Target)
+	}
+	if len(monitor.Checks) != 2 || monitor.Checks[0].Type != "systemd_service" {
+		t.Fatalf("unexpected checks %#v", monitor.Checks)
+	}
+	if len(monitor.Recovery) != 2 || monitor.Recovery[0].Type != "restart_systemd_service" {
+		t.Fatalf("unexpected recovery %#v", monitor.Recovery)
+	}
+}
+
+func TestBuildSystemdCommandsRespectTargetTransport(t *testing.T) {
+	localCheck := command.BuildSystemdIsActiveCommand(config.TargetConfig{}, "ma352-bridge")
+	if localCheck != "systemctl is-active --quiet 'ma352-bridge'" {
+		t.Fatalf("unexpected local check command %q", localCheck)
+	}
+
+	sshTarget := config.TargetConfig{
+		Transport:    "ssh",
+		Host:         "192.168.5.163",
+		User:         "nima",
+		Port:         22,
+		IdentityFile: "/home/nima/.ssh/id_ed25519",
+	}
+
+	remoteCheck := command.BuildSystemdIsActiveCommand(sshTarget, "ma352-bridge")
+	if !strings.Contains(remoteCheck, "ssh") || !strings.Contains(remoteCheck, "nima@192.168.5.163") || !strings.Contains(remoteCheck, "systemctl is-active --quiet") {
+		t.Fatalf("unexpected remote check command %q", remoteCheck)
+	}
+
+	remoteRestart := command.BuildSystemdRestartCommand(sshTarget, "ma352-bridge")
+	if !strings.Contains(remoteRestart, "sudo -n systemctl restart") || !strings.Contains(remoteRestart, "nima@192.168.5.163") {
+		t.Fatalf("unexpected remote restart command %q", remoteRestart)
+	}
+}
+
+func TestRecoveryFlowSupportsRestartSystemdService(t *testing.T) {
+	tmpDir := t.TempDir()
+	sshTarget := config.TargetConfig{
+		Transport:    "ssh",
+		Host:         "192.168.5.163",
+		User:         "nima",
+		Port:         22,
+		IdentityFile: "/home/nima/.ssh/id_ed25519",
+	}
+	checkCommand := command.BuildSystemdIsActiveCommand(sshTarget, "ma352-bridge")
+	restartCommand := command.BuildSystemdRestartCommand(sshTarget, "ma352-bridge")
+
+	runner := &fakeRunner{
+		responses: map[string][]command.Outcome{
+			checkCommand: {
+				{Output: "inactive", ExitCode: 3},
+				{Output: "active", ExitCode: 0},
+			},
+			restartCommand: {
+				{Output: "", ExitCode: 0},
+			},
+		},
+		errors: map[string][]error{
+			checkCommand:   {errors.New("inactive"), nil},
+			restartCommand: {nil},
+		},
+	}
+
+	cfg := config.Config{
+		ConfigFile: filepath.Join(tmpDir, "config.json"),
+		LogFile:    filepath.Join(tmpDir, "procmon.log"),
+		StateFile:  filepath.Join(tmpDir, "state.json"),
+		EventsFile: filepath.Join(tmpDir, "events.json"),
+		API: config.APIConfig{
+			ListenAddress: "127.0.0.1:9645",
+		},
+		Monitors: []config.MonitorConfig{{
+			ID:               "ma352",
+			Name:             "MA352 Bridge",
+			Type:             "systemd-service",
+			Interval:         "1m",
+			FailureThreshold: 1,
+			Cooldown:         "1m",
+			Target:           sshTarget,
+			Checks: []config.CheckConfig{{
+				ID:      "service",
+				Name:    "service",
+				Type:    "systemd_service",
+				Service: "ma352-bridge",
+			}},
+			Recovery: []config.ActionConfig{{
+				Name:    "restart",
+				Type:    "restart_systemd_service",
+				Service: "ma352-bridge",
+			}, {
+				Name: "recheck",
+				Type: "recheck",
+			}},
+		}},
+	}
+
+	logger, closeLog, err := logging.Open(cfg.LogFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeLog()
+
+	manager, err := engine.NewManager(cfg, logger, runner, "test")
+	if err != nil {
+		t.Fatalf("engine.NewManager failed: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager.Start(ctx)
+
+	time.Sleep(50 * time.Millisecond)
+	monitor, ok := manager.MonitorSnapshot("ma352")
+	if !ok {
+		t.Fatal("monitor state missing")
+	}
+	if monitor.Status != "healthy" {
+		t.Fatalf("expected recovered healthy status, got %q", monitor.Status)
+	}
+	if monitor.Target.Transport != "ssh" || monitor.Target.Host != "192.168.5.163" {
+		t.Fatalf("expected target to persist, got %#v", monitor.Target)
+	}
+	if monitor.RecoveryCount != 1 {
+		t.Fatalf("expected one recovery, got %d", monitor.RecoveryCount)
+	}
+}
+
 func TestStatusAPIExposesMonitorState(t *testing.T) {
 	enabled := true
 	cfg := config.Config{
@@ -279,15 +439,21 @@ func TestStatusAPIExposesMonitorState(t *testing.T) {
 			Interval:         "1m",
 			FailureThreshold: 1,
 			Cooldown:         "1m",
+			Target: config.TargetConfig{
+				Transport: "ssh",
+				Host:      "192.168.5.163",
+				User:      "nima",
+				Port:      22,
+			},
 			Checks: []config.CheckConfig{{
-				ID:   "health",
-				Type: "http_json",
-				URL:  "http://127.0.0.1:5000/health",
+				ID:      "service",
+				Type:    "systemd_service",
+				Service: "ma352-bridge",
 			}},
 			Recovery: []config.ActionConfig{{
 				Name:    "restart",
-				Type:    "command",
-				Command: "systemctl restart ma352-bridge",
+				Type:    "restart_systemd_service",
+				Service: "ma352-bridge",
 			}},
 		}},
 	}
@@ -301,8 +467,9 @@ func TestStatusAPIExposesMonitorState(t *testing.T) {
 				Type:                 "ma352",
 				Enabled:              true,
 				Status:               "healthy",
-				ConfiguredChecks:     []config.CheckConfig{{ID: "health", Type: "http_json", URL: "http://127.0.0.1:5000/health"}},
-				ConfiguredRecoveries: []config.ActionConfig{{Name: "restart", Type: "command", Command: "systemctl restart ma352-bridge"}},
+				Target:               config.TargetConfig{Transport: "ssh", Host: "192.168.5.163", User: "nima", Port: 22},
+				ConfiguredChecks:     []config.CheckConfig{{ID: "service", Type: "systemd_service", Service: "ma352-bridge"}},
+				ConfiguredRecoveries: []config.ActionConfig{{Name: "restart", Type: "restart_systemd_service", Service: "ma352-bridge"}},
 			}},
 		},
 		monitor: &state.MonitorRuntimeState{
@@ -311,8 +478,9 @@ func TestStatusAPIExposesMonitorState(t *testing.T) {
 			Type:                 "ma352",
 			Enabled:              true,
 			Status:               "healthy",
-			ConfiguredChecks:     []config.CheckConfig{{ID: "health", Type: "http_json", URL: "http://127.0.0.1:5000/health"}},
-			ConfiguredRecoveries: []config.ActionConfig{{Name: "restart", Type: "command", Command: "systemctl restart ma352-bridge"}},
+			Target:               config.TargetConfig{Transport: "ssh", Host: "192.168.5.163", User: "nima", Port: 22},
+			ConfiguredChecks:     []config.CheckConfig{{ID: "service", Type: "systemd_service", Service: "ma352-bridge"}},
+			ConfiguredRecoveries: []config.ActionConfig{{Name: "restart", Type: "restart_systemd_service", Service: "ma352-bridge"}},
 		},
 	}
 
@@ -332,11 +500,14 @@ func TestStatusAPIExposesMonitorState(t *testing.T) {
 	if monitor.ID != "ma352" || monitor.Status != "healthy" {
 		t.Fatalf("unexpected monitor state %#v", monitor)
 	}
-	if len(monitor.ConfiguredChecks) != 1 || monitor.ConfiguredChecks[0].ID != "health" {
+	if len(monitor.ConfiguredChecks) != 1 || monitor.ConfiguredChecks[0].ID != "service" {
 		t.Fatalf("expected configured checks in API response, got %#v", monitor.ConfiguredChecks)
 	}
 	if len(monitor.ConfiguredRecoveries) != 1 || monitor.ConfiguredRecoveries[0].Name != "restart" {
 		t.Fatalf("expected configured recoveries in API response, got %#v", monitor.ConfiguredRecoveries)
+	}
+	if monitor.Target.Transport != "ssh" || monitor.Target.Host != "192.168.5.163" {
+		t.Fatalf("expected target metadata in API response, got %#v", monitor.Target)
 	}
 }
 
@@ -388,27 +559,27 @@ func TestEventsAPIExposesRecentHistory(t *testing.T) {
 	manager := &stubProvider{
 		events: []events.Event{
 			{
-				ID:         "ma352-1",
-				Timestamp:  "2026-03-08T00:00:00Z",
-				MonitorID:  "ma352",
+				ID:          "ma352-1",
+				Timestamp:   "2026-03-08T00:00:00Z",
+				MonitorID:   "ma352",
 				MonitorName: "MA352",
-				EventType:  "check_failed",
+				EventType:   "check_failed",
 				StatusAfter: "degraded",
 			},
 			{
-				ID:         "ma352-2",
-				Timestamp:  "2026-03-08T00:01:00Z",
-				MonitorID:  "ma352",
+				ID:          "ma352-2",
+				Timestamp:   "2026-03-08T00:01:00Z",
+				MonitorID:   "ma352",
 				MonitorName: "MA352",
-				EventType:  "recovery_succeeded",
+				EventType:   "recovery_succeeded",
 				StatusAfter: "healthy",
 			},
 			{
-				ID:         "homebridge-1",
-				Timestamp:  "2026-03-08T00:02:00Z",
-				MonitorID:  "homebridge",
+				ID:          "homebridge-1",
+				Timestamp:   "2026-03-08T00:02:00Z",
+				MonitorID:   "homebridge",
 				MonitorName: "Homebridge",
-				EventType:  "check_failed",
+				EventType:   "check_failed",
 				StatusAfter: "degraded",
 			},
 		},

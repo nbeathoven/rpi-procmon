@@ -11,15 +11,16 @@ import (
 	"github.com/nbeathoven/rpi-procmon/internal/state"
 )
 
-type Handler func(context.Context, command.Runner, config.ActionConfig) (bool, string, string)
+type Handler func(context.Context, command.Runner, config.MonitorConfig, config.ActionConfig) (bool, string, string)
 
 var registry = map[string]Handler{
-	"command": runCommand,
-	"sleep":   runSleep,
-	"recheck": runRecheck,
+	"command":                 runCommand,
+	"sleep":                   runSleep,
+	"recheck":                 runRecheck,
+	"restart_systemd_service": runRestartSystemdService,
 }
 
-func Run(ctx context.Context, runner command.Runner, action config.ActionConfig) state.ActionResult {
+func Run(ctx context.Context, runner command.Runner, monitor config.MonitorConfig, action config.ActionConfig) state.ActionResult {
 	start := time.Now().UTC()
 	result := state.ActionResult{
 		Name:      action.Name,
@@ -32,7 +33,7 @@ func Run(ctx context.Context, runner command.Runner, action config.ActionConfig)
 	message := ""
 	output := ""
 	if ok {
-		success, message, output = handler(ctx, runner, action)
+		success, message, output = handler(ctx, runner, monitor, action)
 	} else {
 		message = fmt.Sprintf("unsupported action type %q", action.Type)
 	}
@@ -46,7 +47,7 @@ func Run(ctx context.Context, runner command.Runner, action config.ActionConfig)
 	return result
 }
 
-func runCommand(ctx context.Context, runner command.Runner, action config.ActionConfig) (bool, string, string) {
+func runCommand(ctx context.Context, runner command.Runner, _ config.MonitorConfig, action config.ActionConfig) (bool, string, string) {
 	if strings.TrimSpace(action.Command) == "" {
 		return false, "command action missing command", ""
 	}
@@ -58,7 +59,7 @@ func runCommand(ctx context.Context, runner command.Runner, action config.Action
 	return true, "", output
 }
 
-func runSleep(ctx context.Context, _ command.Runner, action config.ActionConfig) (bool, string, string) {
+func runSleep(ctx context.Context, _ command.Runner, _ config.MonitorConfig, action config.ActionConfig) (bool, string, string) {
 	duration := parseDuration(action.Duration, 5*time.Second)
 	timer := time.NewTimer(duration)
 	defer timer.Stop()
@@ -70,8 +71,21 @@ func runSleep(ctx context.Context, _ command.Runner, action config.ActionConfig)
 	}
 }
 
-func runRecheck(context.Context, command.Runner, config.ActionConfig) (bool, string, string) {
+func runRecheck(context.Context, command.Runner, config.MonitorConfig, config.ActionConfig) (bool, string, string) {
 	return true, "recheck requested", ""
+}
+
+func runRestartSystemdService(ctx context.Context, runner command.Runner, monitor config.MonitorConfig, action config.ActionConfig) (bool, string, string) {
+	service := strings.TrimSpace(action.Service)
+	if service == "" {
+		return false, "restart_systemd_service missing service", ""
+	}
+	outcome, err := runner.Run(ctx, command.BuildSystemdRestartCommand(monitor.Target, service))
+	output := limitString(outcome.Output, 2048)
+	if err != nil {
+		return false, fmt.Sprintf("restart_systemd_service failed with exit code %d", outcome.ExitCode), output
+	}
+	return true, "", output
 }
 
 func parseDuration(value string, def time.Duration) time.Duration {

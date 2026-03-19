@@ -8,6 +8,7 @@
 - Supports service-specific checks such as HTTP health, Docker container state, Docker log pattern matching, command checks, system load, memory, I/O pressure, and file path access.
 - Persists per-monitor runtime state including last check times, last failures, last recoveries, cooldowns, counters, and detailed check/action results.
 - Persists a queryable event history for failures and recovery actions so external apps can pull recent monitor activity without scraping logs.
+- Supports target-aware monitors so a central procmon host can monitor and recover local or remote systemd services.
 - Exposes API endpoints for external apps:
   - `GET /health`
   - `GET /status`
@@ -84,8 +85,21 @@ The `ma352` monitor is intended for the McIntosh amplifier bridge service from [
 
 The template assumes:
 - systemd service name similar to `ma352-bridge`
-- local health endpoint similar to `http://127.0.0.1:5000/health`
+- health endpoint similar to `http://<ma352-host>:5000/health`
 - recovery by restarting the bridge service and rechecking health
+
+The bootstrap flow can now configure MA352 as:
+- local service control on the procmon host
+- remote service control over SSH to another Raspberry Pi
+
+For a remote MA352 deployment, procmon uses:
+- `systemd_service` to check `ma352-bridge` on the remote host
+- `http_json` to verify `http://<ma352-host>:5000/health`
+- `restart_systemd_service` to restart `ma352-bridge` on the remote host
+
+The bridge service itself is not expected to expose a restart endpoint. Procmon keeps service control at the host/systemd layer.
+
+Remote restart requires that the procmon host already has non-interactive SSH access to the remote MA352 host and that the remote user can run `sudo -n systemctl restart ma352-bridge`.
 
 ## Manual Build
 
@@ -181,11 +195,19 @@ That page reads directly from the running procmon API and shows overall health, 
 
 Each monitor defines:
 - `id`, `name`, `type`
+- `target`
 - `interval`
 - `failure_threshold`
 - `cooldown`
 - `checks[]`
 - `recovery[]`
+
+The optional `target` object identifies where service control happens:
+- `transport`: `local` or `ssh`
+- `host`: remote host/IP for SSH-backed service control
+- `user`: SSH user
+- `port`: SSH port
+- `identity_file`: SSH identity file path on the procmon host
 
 Checks currently supported:
 - `http_json`
@@ -196,11 +218,13 @@ Checks currently supported:
 - `docker_container`
 - `docker_log_pattern`
 - `command`
+- `systemd_service`
 
 Recovery steps currently supported:
 - `command`
 - `sleep`
 - `recheck`
+- `restart_systemd_service`
 
 Config validation is strict. Invalid monitor ids, duplicate check ids, unsupported check or recovery types, missing required fields, and invalid durations fail fast at startup.
 

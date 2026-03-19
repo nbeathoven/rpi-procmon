@@ -51,14 +51,14 @@ func NewManager(cfg config.Config, logger io.Writer, runner command.Runner, appV
 	snapshot.AppVersion = appVersion
 
 	manager := &Manager{
-		cfg:        cfg,
-		logger:     logger,
-		runner:     runner,
-		store:      store,
-		eventStore: eventStore,
-		startedAt:  startedAt,
-		appVersion: appVersion,
-		current:    snapshot,
+		cfg:          cfg,
+		logger:       logger,
+		runner:       runner,
+		store:        store,
+		eventStore:   eventStore,
+		startedAt:    startedAt,
+		appVersion:   appVersion,
+		current:      snapshot,
 		eventHistory: eventHistory,
 	}
 
@@ -244,14 +244,14 @@ func (m *Manager) runMonitorCycle(ctx context.Context, monitor config.MonitorCon
 		monitorState.LastFailureReasons = nil
 		if shouldRecordHealthyEvent(statusBeforeCheck) {
 			m.appendEventLocked(events.Event{
-				ID:          eventID(monitor.ID, finished),
-				Timestamp:   finished.Format(time.RFC3339),
-				MonitorID:   monitor.ID,
-				MonitorName: monitor.Name,
-				MonitorType: monitor.Type,
-				EventType:   "check_succeeded",
+				ID:           eventID(monitor.ID, finished),
+				Timestamp:    finished.Format(time.RFC3339),
+				MonitorID:    monitor.ID,
+				MonitorName:  monitor.Name,
+				MonitorType:  monitor.Type,
+				EventType:    "check_succeeded",
 				StatusBefore: statusBeforeCheck,
-				StatusAfter: "healthy",
+				StatusAfter:  "healthy",
 				CheckResults: results,
 			})
 		}
@@ -402,7 +402,7 @@ func (m *Manager) executeRecovery(ctx context.Context, monitor config.MonitorCon
 	logging.Logf(m.logger, "monitor recovery start: id=%s actions=%d", monitor.ID, len(monitor.Recovery))
 
 	for _, action := range monitor.Recovery {
-		actionResult := actions.Run(ctx, m.runner, action)
+		actionResult := actions.Run(ctx, m.runner, monitor, action)
 		results = append(results, actionResult)
 		logging.Logf(m.logger, "monitor recovery action: id=%s action=%s type=%s success=%t message=%s", monitor.ID, actionResult.Name, actionResult.Type, actionResult.Success, actionResult.Message)
 
@@ -431,6 +431,7 @@ func (m *Manager) ensureMonitorStateLocked(monitor config.MonitorConfig) *state.
 		existing.Interval = monitor.Interval
 		existing.FailureThreshold = monitor.FailureThreshold
 		existing.Cooldown = monitor.Cooldown
+		existing.Target = monitor.Target
 		existing.Metadata = cloneStringMap(monitor.Metadata)
 		existing.ConfiguredChecks = cloneCheckConfigs(monitor.Checks)
 		existing.ConfiguredRecoveries = cloneActionConfigs(monitor.Recovery)
@@ -446,6 +447,7 @@ func (m *Manager) ensureMonitorStateLocked(monitor config.MonitorConfig) *state.
 		Interval:             monitor.Interval,
 		FailureThreshold:     monitor.FailureThreshold,
 		Cooldown:             monitor.Cooldown,
+		Target:               monitor.Target,
 		Metadata:             cloneStringMap(monitor.Metadata),
 		ConfiguredChecks:     cloneCheckConfigs(monitor.Checks),
 		ConfiguredRecoveries: cloneActionConfigs(monitor.Recovery),

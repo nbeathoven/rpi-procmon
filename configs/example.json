@@ -15,6 +15,9 @@
       "interval": "1m",
       "failure_threshold": 1,
       "cooldown": "15m",
+      "target": {
+        "transport": "local"
+      },
       "metadata": {
         "repo_path": "/opt/homebridge-mcintosh-rs232",
         "service_name": "ma352-bridge"
@@ -22,8 +25,8 @@
       "checks": [
         {
           "id": "ma352-service-active",
-          "type": "command",
-          "command": "systemctl is-active --quiet ma352-bridge"
+          "type": "systemd_service",
+          "service": "ma352-bridge"
         },
         {
           "id": "ma352-health",
@@ -37,8 +40,8 @@
       "recovery": [
         {
           "name": "restart-ma352-bridge",
-          "type": "command",
-          "command": "systemctl restart ma352-bridge"
+          "type": "restart_systemd_service",
+          "service": "ma352-bridge"
         },
         {
           "name": "wait-after-restart",

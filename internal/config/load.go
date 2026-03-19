@@ -91,11 +91,17 @@ func Normalize(cfg *Config) error {
 		if strings.TrimSpace(mon.Cooldown) == "" {
 			mon.Cooldown = "5m"
 		}
+		if strings.TrimSpace(mon.Target.Transport) == "" {
+			mon.Target.Transport = "local"
+		}
 		if _, err := time.ParseDuration(strings.TrimSpace(mon.Interval)); err != nil {
 			return fmt.Errorf("monitor %q interval %q is invalid: %w", mon.ID, mon.Interval, err)
 		}
 		if _, err := time.ParseDuration(strings.TrimSpace(mon.Cooldown)); err != nil {
 			return fmt.Errorf("monitor %q cooldown %q is invalid: %w", mon.ID, mon.Cooldown, err)
+		}
+		if err := validateTarget(mon.ID, mon.Target); err != nil {
+			return err
 		}
 		if len(mon.Checks) == 0 {
 			return fmt.Errorf("monitor %q has no checks", mon.ID)

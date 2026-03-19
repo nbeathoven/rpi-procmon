@@ -15,6 +15,14 @@ type APIConfig struct {
 	ReadHeaderTimeout string `json:"read_header_timeout"`
 }
 
+type TargetConfig struct {
+	Transport    string `json:"transport,omitempty"`
+	Host         string `json:"host,omitempty"`
+	User         string `json:"user,omitempty"`
+	Port         int    `json:"port,omitempty"`
+	IdentityFile string `json:"identity_file,omitempty"`
+}
+
 type MonitorConfig struct {
 	ID               string            `json:"id"`
 	Name             string            `json:"name"`
@@ -23,6 +31,7 @@ type MonitorConfig struct {
 	Interval         string            `json:"interval"`
 	FailureThreshold int               `json:"failure_threshold"`
 	Cooldown         string            `json:"cooldown"`
+	Target           TargetConfig      `json:"target,omitempty"`
 	Metadata         map[string]string `json:"metadata,omitempty"`
 	Checks           []CheckConfig     `json:"checks"`
 	Recovery         []ActionConfig    `json:"recovery"`
@@ -48,6 +57,7 @@ type CheckConfig struct {
 	Patterns                []string `json:"patterns,omitempty"`
 	MatchCountThreshold     int      `json:"match_count_threshold,omitempty"`
 	Command                 string   `json:"command,omitempty"`
+	Service                 string   `json:"service,omitempty"`
 	ExpectedExitCode        int      `json:"expected_exit_code,omitempty"`
 	ExpectedOutputPatterns  []string `json:"expected_output_patterns,omitempty"`
 	ForbiddenOutputPatterns []string `json:"forbidden_output_patterns,omitempty"`
@@ -58,6 +68,7 @@ type ActionConfig struct {
 	Name     string `json:"name,omitempty"`
 	Type     string `json:"type"`
 	Command  string `json:"command,omitempty"`
+	Service  string `json:"service,omitempty"`
 	Duration string `json:"duration,omitempty"`
 }
 

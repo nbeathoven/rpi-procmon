@@ -860,6 +860,16 @@
       return "No detailed reason reported yet.";
     }
 
+    function formatTargetLabel(monitor) {
+      const target = monitor && monitor.target ? monitor.target : {};
+      const transport = (target.transport || "local").trim() || "local";
+      const host = (target.host || "").trim();
+      if (transport === "ssh" && host) {
+        return `Remote ${host}`;
+      }
+      return "Local host";
+    }
+
     function renderMonitors(snapshot) {
       const monitors = Array.isArray(snapshot.monitors) ? snapshot.monitors : [];
       elements.monitorCountLabel.textContent = `${monitors.length} monitor${monitors.length === 1 ? "" : "s"}`;
@@ -881,6 +891,7 @@
               <span class="meta-chip">${escapeHTML(monitor.type || "monitor")}</span>
             </div>
             <div class="monitor-meta">
+              <span class="meta-chip">${escapeHTML(formatTargetLabel(monitor))}</span>
               <span class="meta-chip">Next ${escapeHTML(fmtTimestamp(monitor.next_check_at))}</span>
               <span class="meta-chip">Cooldown ${escapeHTML(monitor.cooldown || "n/a")}</span>
             </div>
@@ -926,6 +937,10 @@
             <div class="detail-block">
               <span class="detail-label">Type</span>
               <span class="detail-value">${escapeHTML(monitor.type || "unknown")}</span>
+            </div>
+            <div class="detail-block">
+              <span class="detail-label">Target</span>
+              <span class="detail-value">${escapeHTML(formatTargetLabel(monitor))}</span>
             </div>
             <div class="detail-block">
               <span class="detail-label">Last success</span>
