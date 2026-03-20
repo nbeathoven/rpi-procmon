@@ -517,24 +517,6 @@
       gap: 18px;
     }
 
-    .timeline-day {
-      display: grid;
-      gap: 12px;
-    }
-
-    .timeline-day-label {
-      font-size: 0.82rem;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: rgba(255, 214, 76, 0.92);
-      padding: 0 2px;
-    }
-
-    .timeline-stack {
-      display: grid;
-      gap: 10px;
-    }
-
     .timeline-group {
       display: grid;
       gap: 12px;
@@ -585,6 +567,28 @@
     .timeline-items {
       display: grid;
       gap: 8px;
+    }
+
+    .timeline-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 124px;
+      height: 36px;
+      padding: 0 14px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--text);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .timeline-group.selected {
+      border-color: var(--line-strong);
+      box-shadow:
+        inset 0 0 0 1px rgba(255, 204, 0, 0.2),
+        0 18px 36px rgba(0, 0, 0, 0.16);
     }
 
     .timeline-card {
@@ -751,7 +755,7 @@
         <div class="panel-header">
           <div>
             <h2>Recent Issues</h2>
-            <p class="panel-copy">Grouped event stacks from procmon, organized more like a notification center than a flat last-12 feed.</p>
+            <p class="panel-copy">One event stack per monitored service. Expand a service to review all of its recorded issues and recoveries in one place.</p>
           </div>
           <span class="mono" id="events-count-label">0 events</span>
         </div>
@@ -786,6 +790,7 @@
       snapshot: null,
       events: [],
       selectedMonitorID: "",
+      expandedEventMonitorID: "",
       refreshTimer: null,
     };
 
@@ -1106,102 +1111,113 @@
     }
 
     function groupEvents(events) {
-      const dayMap = new Map();
+      const groups = new Map();
 
       for (const event of events) {
+        const monitorID = event.monitor_id || "unknown";
         const timestamp = event.timestamp || "";
-        const dayKey = timestamp ? timestamp.slice(0, 10) : "unknown";
-        const stackKey = [
-          event.monitor_id || "unknown",
-          event.event_type || "event",
-          event.status_after || "",
-          event.reason || "",
-        ].join("::");
 
-        if (!dayMap.has(dayKey)) {
-          dayMap.set(dayKey, {
-            key: dayKey,
-            label: fmtDayLabel(timestamp),
-            latestTimestamp: timestamp,
-            stacks: new Map(),
-          });
-        }
-
-        const day = dayMap.get(dayKey);
-        if (!day.stacks.has(stackKey)) {
-          day.stacks.set(stackKey, {
-            key: stackKey,
+        if (!groups.has(monitorID)) {
+          groups.set(monitorID, {
+            monitorID,
             monitorName: event.monitor_name || event.monitor_id || "Unknown monitor",
-            eventType: event.event_type || "event",
-            statusAfter: event.status_after || event.event_type || "event",
-            reason: event.reason || "No reason attached to this event.",
             latestTimestamp: timestamp,
+            latestReason: event.reason || "No reason attached to this event.",
+            latestStatus: event.status_after || event.event_type || "event",
             items: [],
           });
         }
 
-        const stack = day.stacks.get(stackKey);
-        stack.items.push(event);
-        if (timestamp > stack.latestTimestamp) {
-          stack.latestTimestamp = timestamp;
-        }
-        if (timestamp > day.latestTimestamp) {
-          day.latestTimestamp = timestamp;
+        const group = groups.get(monitorID);
+        group.items.push(event);
+        if (timestamp > group.latestTimestamp) {
+          group.latestTimestamp = timestamp;
+          group.latestReason = event.reason || "No reason attached to this event.";
+          group.latestStatus = event.status_after || event.event_type || "event";
+          group.monitorName = event.monitor_name || event.monitor_id || group.monitorName;
         }
       }
 
-      return Array.from(dayMap.values())
-        .sort((a, b) => String(b.latestTimestamp).localeCompare(String(a.latestTimestamp)))
-        .map((day) => ({
-          ...day,
-          stacks: Array.from(day.stacks.values()).sort((a, b) => String(b.latestTimestamp).localeCompare(String(a.latestTimestamp))),
-        }));
+      return Array.from(groups.values())
+        .map((group) => ({
+          ...group,
+          items: group.items.sort((a, b) => String(b.timestamp || "").localeCompare(String(a.timestamp || ""))),
+        }))
+        .sort((a, b) => String(b.latestTimestamp).localeCompare(String(a.latestTimestamp)));
     }
 
     function renderEvents(events) {
       const groups = groupEvents(events);
-      elements.eventsCountLabel.textContent = `${events.length} event${events.length === 1 ? "" : "s"} in ${groups.length} stack${groups.length === 1 ? "" : "s"}`;
+      elements.eventsCountLabel.textContent = `${events.length} event${events.length === 1 ? "" : "s"} across ${groups.length} service${groups.length === 1 ? "" : "s"}`;
       if (!events.length) {
         elements.timeline.innerHTML = `<div class="empty-state">No monitor issues have been reported yet.</div>`;
         return;
       }
 
       elements.timeline.innerHTML = groups.map((day) => `
-        <section class="timeline-day">
-          <div class="timeline-day-label">${escapeHTML(day.label)}</div>
-          <div class="timeline-stack">
-            ${day.stacks.map((stack) => `
-              <article class="timeline-group">
-                <div class="timeline-group-head">
-                  <div class="timeline-group-title">
-                    <strong>${escapeHTML(stack.monitorName)}</strong>
-                    <div class="timeline-type">${escapeHTML(stack.eventType.replaceAll("_", " "))}</div>
-                  </div>
-                  <div class="timeline-group-meta">
-                    <span class="timeline-badge">${stack.items.length}</span>
-                    <div class="status-pill ${statusClass(stack.statusAfter)}">${escapeHTML(stack.statusAfter)}</div>
-                  </div>
-                </div>
-                <div class="timeline-reason">${escapeHTML(stack.reason)}</div>
-                <div class="timeline-items">
-                  ${stack.items.slice(0, 3).map((event) => `
-                    <div class="timeline-card">
-                      <div class="timeline-item-head">
-                        <div class="timeline-item-meta">
-                          <span class="mono">${escapeHTML(fmtTimestamp(event.timestamp))}</span>
-                        </div>
-                        <div class="status-pill ${statusClass(event.status_after)}">${escapeHTML(event.status_after || event.event_type || "event")}</div>
-                      </div>
-                      <div class="timeline-reason">${escapeHTML(event.reason || "No reason attached to this event.")}</div>
-                    </div>
-                  `).join("")}
-                  ${stack.items.length > 3 ? `<div class="mono">+${stack.items.length - 3} earlier related event${stack.items.length - 3 === 1 ? "" : "s"}</div>` : ""}
-                </div>
-              </article>
-            `).join("")}
+        <article class="timeline-group${day.monitorID === state.expandedEventMonitorID ? " selected" : ""}">
+          <div class="timeline-group-head">
+            <div class="timeline-group-title">
+              <strong>${escapeHTML(day.monitorName)}</strong>
+              <div class="timeline-type">Latest event ${escapeHTML(fmtTimestamp(day.latestTimestamp))}</div>
+            </div>
+            <div class="timeline-group-meta">
+              <span class="timeline-badge">${day.items.length}</span>
+              <div class="status-pill ${statusClass(day.latestStatus)}">${escapeHTML(day.latestStatus)}</div>
+              <button class="timeline-toggle" data-event-monitor-id="${escapeHTML(day.monitorID)}">
+                ${day.monitorID === state.expandedEventMonitorID ? "Hide history" : "Show history"}
+              </button>
+            </div>
           </div>
-        </section>
+          <div class="timeline-reason">${escapeHTML(day.latestReason)}</div>
+          ${day.monitorID === state.expandedEventMonitorID ? `
+            <div class="timeline-items">
+              ${day.items.map((event) => `
+                <div class="timeline-card">
+                  <div class="timeline-item-head">
+                    <div class="timeline-item-meta">
+                      <span class="mono">${escapeHTML(fmtTimestamp(event.timestamp))}</span>
+                      <span class="timeline-type">${escapeHTML((event.event_type || "event").replaceAll("_", " "))}</span>
+                    </div>
+                    <div class="status-pill ${statusClass(event.status_after)}">${escapeHTML(event.status_after || event.event_type || "event")}</div>
+                  </div>
+                  <div class="timeline-reason">${escapeHTML(event.reason || "No reason attached to this event.")}</div>
+                </div>
+              `).join("")}
+            </div>
+          ` : `
+            <div class="timeline-items">
+              ${day.items.slice(0, 2).map((event) => `
+                <div class="timeline-card">
+                  <div class="timeline-item-head">
+                    <div class="timeline-item-meta">
+                      <span class="mono">${escapeHTML(fmtTimestamp(event.timestamp))}</span>
+                      <span class="timeline-type">${escapeHTML((event.event_type || "event").replaceAll("_", " "))}</span>
+                    </div>
+                    <div class="status-pill ${statusClass(event.status_after)}">${escapeHTML(event.status_after || event.event_type || "event")}</div>
+                  </div>
+                  <div class="timeline-reason">${escapeHTML(event.reason || "No reason attached to this event.")}</div>
+                </div>
+              `).join("")}
+              ${day.items.length > 2 ? `<div class="mono">+${day.items.length - 2} earlier event${day.items.length - 2 === 1 ? "" : "s"} for ${escapeHTML(day.monitorName)}</div>` : ""}
+            </div>
+          `}
+        </article>
       `).join("");
+
+      elements.timeline.querySelectorAll("[data-event-monitor-id]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const monitorID = button.getAttribute("data-event-monitor-id") || "";
+          state.expandedEventMonitorID = state.expandedEventMonitorID === monitorID ? "" : monitorID;
+          if (monitorID) {
+            state.selectedMonitorID = monitorID;
+          }
+          renderEvents(state.events);
+          if (state.selectedMonitorID) {
+            void selectMonitor(state.selectedMonitorID);
+          }
+        });
+      });
     }
 
     async function selectMonitor(id) {
