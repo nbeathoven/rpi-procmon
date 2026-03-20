@@ -473,7 +473,8 @@
     }
 
     .result-row,
-    .timeline-card {
+    .timeline-card,
+    .timeline-group {
       padding: 14px 16px;
     }
 
@@ -513,11 +514,85 @@
 
     .timeline {
       grid-template-columns: 1fr;
+      gap: 18px;
+    }
+
+    .timeline-day {
+      display: grid;
+      gap: 12px;
+    }
+
+    .timeline-day-label {
+      font-size: 0.82rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(255, 214, 76, 0.92);
+      padding: 0 2px;
+    }
+
+    .timeline-stack {
+      display: grid;
+      gap: 10px;
+    }
+
+    .timeline-group {
+      display: grid;
+      gap: 12px;
+      border-radius: 18px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.05)),
+        rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .timeline-group-head,
+    .timeline-item-head {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .timeline-group-title {
+      display: grid;
+      gap: 6px;
+    }
+
+    .timeline-group-meta,
+    .timeline-item-meta {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .timeline-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 28px;
+      height: 28px;
+      padding: 0 10px;
+      border-radius: 999px;
+      background: rgba(255, 204, 0, 0.14);
+      color: #ffe587;
+      font-size: 0.8rem;
+      font-weight: 700;
+      border: 1px solid rgba(255, 204, 0, 0.16);
+    }
+
+    .timeline-items {
+      display: grid;
+      gap: 8px;
     }
 
     .timeline-card {
       display: grid;
       gap: 8px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
     }
 
     .timeline-type {
@@ -676,7 +751,7 @@
         <div class="panel-header">
           <div>
             <h2>Recent Issues</h2>
-            <p class="panel-copy">Reverse-chronological events from procmon, suitable for the future Homebridge issue history panel.</p>
+            <p class="panel-copy">Grouped event stacks from procmon, organized more like a notification center than a flat last-12 feed.</p>
           </div>
           <span class="mono" id="events-count-label">0 events</span>
         </div>
@@ -751,6 +826,33 @@
       return new Intl.DateTimeFormat(undefined, {
         dateStyle: "medium",
         timeStyle: "short",
+      }).format(date);
+    }
+
+    function fmtDayLabel(value) {
+      if (!value) {
+        return "Unknown day";
+      }
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) {
+        return value;
+      }
+
+      const eventDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const deltaDays = Math.round((today - eventDay) / 86400000);
+      if (deltaDays === 0) {
+        return "Today";
+      }
+      if (deltaDays === 1) {
+        return "Yesterday";
+      }
+
+      return new Intl.DateTimeFormat(undefined, {
+        weekday: "long",
+        month: "short",
+        day: "numeric",
       }).format(date);
     }
 
@@ -1003,23 +1105,102 @@
       `;
     }
 
+    function groupEvents(events) {
+      const dayMap = new Map();
+
+      for (const event of events) {
+        const timestamp = event.timestamp || "";
+        const dayKey = timestamp ? timestamp.slice(0, 10) : "unknown";
+        const stackKey = [
+          event.monitor_id || "unknown",
+          event.event_type || "event",
+          event.status_after || "",
+          event.reason || "",
+        ].join("::");
+
+        if (!dayMap.has(dayKey)) {
+          dayMap.set(dayKey, {
+            key: dayKey,
+            label: fmtDayLabel(timestamp),
+            latestTimestamp: timestamp,
+            stacks: new Map(),
+          });
+        }
+
+        const day = dayMap.get(dayKey);
+        if (!day.stacks.has(stackKey)) {
+          day.stacks.set(stackKey, {
+            key: stackKey,
+            monitorName: event.monitor_name || event.monitor_id || "Unknown monitor",
+            eventType: event.event_type || "event",
+            statusAfter: event.status_after || event.event_type || "event",
+            reason: event.reason || "No reason attached to this event.",
+            latestTimestamp: timestamp,
+            items: [],
+          });
+        }
+
+        const stack = day.stacks.get(stackKey);
+        stack.items.push(event);
+        if (timestamp > stack.latestTimestamp) {
+          stack.latestTimestamp = timestamp;
+        }
+        if (timestamp > day.latestTimestamp) {
+          day.latestTimestamp = timestamp;
+        }
+      }
+
+      return Array.from(dayMap.values())
+        .sort((a, b) => String(b.latestTimestamp).localeCompare(String(a.latestTimestamp)))
+        .map((day) => ({
+          ...day,
+          stacks: Array.from(day.stacks.values()).sort((a, b) => String(b.latestTimestamp).localeCompare(String(a.latestTimestamp))),
+        }));
+    }
+
     function renderEvents(events) {
-      elements.eventsCountLabel.textContent = `${events.length} event${events.length === 1 ? "" : "s"}`;
+      const groups = groupEvents(events);
+      elements.eventsCountLabel.textContent = `${events.length} event${events.length === 1 ? "" : "s"} in ${groups.length} stack${groups.length === 1 ? "" : "s"}`;
       if (!events.length) {
         elements.timeline.innerHTML = `<div class="empty-state">No monitor issues have been reported yet.</div>`;
         return;
       }
 
-      elements.timeline.innerHTML = events.map((event) => `
-        <article class="timeline-card">
-          <div class="timeline-header">
-            <strong>${escapeHTML(event.monitor_name || event.monitor_id || "Unknown monitor")}</strong>
-            <div class="status-pill ${statusClass(event.status_after)}">${escapeHTML(event.status_after || event.event_type || "event")}</div>
+      elements.timeline.innerHTML = groups.map((day) => `
+        <section class="timeline-day">
+          <div class="timeline-day-label">${escapeHTML(day.label)}</div>
+          <div class="timeline-stack">
+            ${day.stacks.map((stack) => `
+              <article class="timeline-group">
+                <div class="timeline-group-head">
+                  <div class="timeline-group-title">
+                    <strong>${escapeHTML(stack.monitorName)}</strong>
+                    <div class="timeline-type">${escapeHTML(stack.eventType.replaceAll("_", " "))}</div>
+                  </div>
+                  <div class="timeline-group-meta">
+                    <span class="timeline-badge">${stack.items.length}</span>
+                    <div class="status-pill ${statusClass(stack.statusAfter)}">${escapeHTML(stack.statusAfter)}</div>
+                  </div>
+                </div>
+                <div class="timeline-reason">${escapeHTML(stack.reason)}</div>
+                <div class="timeline-items">
+                  ${stack.items.slice(0, 3).map((event) => `
+                    <div class="timeline-card">
+                      <div class="timeline-item-head">
+                        <div class="timeline-item-meta">
+                          <span class="mono">${escapeHTML(fmtTimestamp(event.timestamp))}</span>
+                        </div>
+                        <div class="status-pill ${statusClass(event.status_after)}">${escapeHTML(event.status_after || event.event_type || "event")}</div>
+                      </div>
+                      <div class="timeline-reason">${escapeHTML(event.reason || "No reason attached to this event.")}</div>
+                    </div>
+                  `).join("")}
+                  ${stack.items.length > 3 ? `<div class="mono">+${stack.items.length - 3} earlier related event${stack.items.length - 3 === 1 ? "" : "s"}</div>` : ""}
+                </div>
+              </article>
+            `).join("")}
           </div>
-          <div class="timeline-type">${escapeHTML((event.event_type || "event").replaceAll("_", " "))}</div>
-          <div class="timeline-reason">${escapeHTML(event.reason || "No reason attached to this event.")}</div>
-          <div class="mono">${escapeHTML(fmtTimestamp(event.timestamp))}</div>
-        </article>
+        </section>
       `).join("");
     }
 
@@ -1042,7 +1223,7 @@
       try {
         const [snapshot, eventPayload] = await Promise.all([
           fetchJSON("/status"),
-          fetchJSON("/events?limit=12"),
+          fetchJSON("/events?limit=60"),
         ]);
         state.snapshot = snapshot;
         state.events = Array.isArray(eventPayload.events) ? eventPayload.events : [];
