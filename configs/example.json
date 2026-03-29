@@ -68,16 +68,26 @@
           "container": "scrypted"
         },
         {
+          "id": "arlo-plugin-process",
+          "type": "command",
+          "command": "docker exec scrypted sh -lc 'pgrep -af \"plugin_remote.py @scrypted/arlo\"'",
+          "expected_output_patterns": [
+            "plugin_remote.py @scrypted/arlo"
+          ]
+        },
+        {
           "id": "arlo-log-errors",
           "type": "docker_log_pattern",
           "container": "scrypted",
-          "since": "10m",
-          "match_count_threshold": 4,
+          "since": "30m",
+          "match_count_threshold": 2,
           "patterns": [
             "Arlo Cloud snapshot failed: Failed to get snapshot URL",
             "MQTT Event Stream .* failed to connect with return code 4",
             "MQTT Event Stream .* disconnected with return code 5",
-            "HTTP error 401 .*fullFrameSnapshot"
+            "HTTP error 401 .*fullFrameSnapshot",
+            "Error discovering devices: Arlo client not connected, cannot discover devices",
+            "Error during periodic device discovery: Arlo client not connected, cannot discover devices"
           ]
         }
       ],
@@ -108,6 +118,90 @@
         },
         {
           "name": "recheck-after-container-restart",
+          "type": "recheck"
+        }
+      ]
+    },
+    {
+      "id": "snooperd",
+      "name": "Snooper Orchestrator",
+      "type": "systemd-service",
+      "interval": "1m",
+      "failure_threshold": 1,
+      "cooldown": "5m",
+      "target": {
+        "transport": "ssh",
+        "host": "192.168.5.93",
+        "user": "nima",
+        "port": 22,
+        "identity_file": "/home/nima/.ssh/id_ed25519"
+      },
+      "metadata": {
+        "health_url": "http://127.0.0.1:8088/healthz",
+        "service_name": "snooperd"
+      },
+      "checks": [
+        {
+          "id": "snooperd-systemd",
+          "type": "systemd_service",
+          "service": "snooperd"
+        }
+      ],
+      "recovery": [
+        {
+          "name": "restart-snooperd",
+          "type": "restart_systemd_service",
+          "service": "snooperd"
+        },
+        {
+          "name": "wait-after-restart",
+          "type": "sleep",
+          "duration": "5s"
+        },
+        {
+          "name": "recheck",
+          "type": "recheck"
+        }
+      ]
+    },
+    {
+      "id": "snooper-gui",
+      "name": "Snooper GUI",
+      "type": "systemd-service",
+      "interval": "1m",
+      "failure_threshold": 1,
+      "cooldown": "5m",
+      "target": {
+        "transport": "ssh",
+        "host": "192.168.5.93",
+        "user": "nima",
+        "port": 22,
+        "identity_file": "/home/nima/.ssh/id_ed25519"
+      },
+      "metadata": {
+        "health_url": "http://127.0.0.1:18093/healthz",
+        "service_name": "snooper-gui"
+      },
+      "checks": [
+        {
+          "id": "snooper-gui-systemd",
+          "type": "systemd_service",
+          "service": "snooper-gui"
+        }
+      ],
+      "recovery": [
+        {
+          "name": "restart-snooper-gui",
+          "type": "restart_systemd_service",
+          "service": "snooper-gui"
+        },
+        {
+          "name": "wait-after-restart",
+          "type": "sleep",
+          "duration": "5s"
+        },
+        {
+          "name": "recheck",
           "type": "recheck"
         }
       ]

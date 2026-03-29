@@ -321,6 +321,14 @@ elif template == "scrypted_arlo":
                 "container": os.environ["PROC_CONTAINER_NAME"],
             },
             {
+                "id": "arlo-plugin-process",
+                "type": "command",
+                "command": f"docker exec {os.environ['PROC_CONTAINER_NAME']} sh -lc 'pgrep -af \"plugin_remote.py @scrypted/arlo\"'",
+                "expected_output_patterns": [
+                    "plugin_remote.py @scrypted/arlo",
+                ],
+            },
+            {
                 "id": "arlo-log-errors",
                 "type": "docker_log_pattern",
                 "container": os.environ["PROC_CONTAINER_NAME"],
@@ -331,6 +339,8 @@ elif template == "scrypted_arlo":
                     "MQTT Event Stream .* failed to connect with return code 4",
                     "MQTT Event Stream .* disconnected with return code 5",
                     "HTTP error 401 .*fullFrameSnapshot",
+                    "Error discovering devices: Arlo client not connected, cannot discover devices",
+                    "Error during periodic device discovery: Arlo client not connected, cannot discover devices",
                 ],
             },
         ],
@@ -767,15 +777,15 @@ add_scrypted_arlo_monitor() {
   local container_name interval cooldown log_since match_threshold plugin_restart_cmd recovery_target
   echo
   echo "Scrypted Arlo monitor setup:"
-  echo "  - Log scan window: how far back procmon scans Scrypted logs, for example 10m or 1h."
+  echo "  - Log scan window: how far back procmon scans Scrypted logs, for example 30m or 1h."
   echo "  - Failure threshold: how many matching Arlo error lines inside that window trigger recovery."
   echo "  - Primary recovery target: default is plugin restart first."
   echo "    Type scrypted if you want container restart to be the first recovery action instead."
   container_name="$(prompt_default "Scrypted container name" "scrypted")"
   interval="$(prompt_default "Scrypted Arlo check interval" "5m")"
   cooldown="$(prompt_default "Scrypted Arlo recovery cooldown" "20m")"
-  log_since="$(prompt_default "Scrypted Arlo log scan window (duration like 10m or 1h)" "10m")"
-  match_threshold="$(prompt_default "Scrypted Arlo matching error lines required before recovery" "4")"
+  log_since="$(prompt_default "Scrypted Arlo log scan window (duration like 30m or 1h)" "30m")"
+  match_threshold="$(prompt_default "Scrypted Arlo matching error lines required before recovery" "2")"
   recovery_target="$(prompt_default "Primary recovery target (plugin or scrypted)" "plugin")"
   recovery_target="$(printf '%s' "$recovery_target" | tr '[:upper:]' '[:lower:]')"
 

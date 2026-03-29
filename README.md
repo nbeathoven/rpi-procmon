@@ -121,6 +121,10 @@ sudo cp systemd/rpi-procmon.env.example /etc/default/rpi-procmon
 
 The Scrypted example intentionally ships with a failing placeholder plugin restart command. Replace it with your real Arlo plugin restart command before enabling automated recovery.
 
+The built-in `scrypted-arlo` monitor now uses:
+- a positive plugin-process check to confirm `@scrypted/arlo` is present inside the container
+- log-pattern failure detection for recurring Arlo discovery/auth failures
+
 ## Manual Install Service
 
 ```bash
