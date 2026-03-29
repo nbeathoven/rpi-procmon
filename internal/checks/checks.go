@@ -266,7 +266,7 @@ func runDockerLogPattern(ctx context.Context, runner command.Runner, _ config.Mo
 	if strings.TrimSpace(since) == "" {
 		since = "10m"
 	}
-	cmd := fmt.Sprintf("docker logs --since %s %s 2>&1", shellQuote(since), shellQuote(check.Container))
+	cmd := fmt.Sprintf("docker logs --timestamps --since %s %s 2>&1", shellQuote(since), shellQuote(check.Container))
 	outcome, err := runner.Run(ctx, cmd)
 	logText := outcome.Output
 	if err != nil && strings.TrimSpace(logText) == "" {
@@ -276,16 +276,38 @@ func runDockerLogPattern(ctx context.Context, runner command.Runner, _ config.Mo
 	if regexErr != nil {
 		return false, regexErr.Error(), nil
 	}
+	successCount, matchedSuccessPatterns, regexErr := countPatternMatches(logText, check.SuccessPatterns)
+	if regexErr != nil {
+		return false, regexErr.Error(), nil
+	}
 	threshold := check.MatchCountThreshold
 	if threshold <= 0 {
 		threshold = 1
 	}
 	observations := map[string]any{
-		"container":        check.Container,
-		"since":            since,
-		"match_count":      count,
-		"threshold":        threshold,
-		"matched_patterns": matchedPatterns,
+		"container":                check.Container,
+		"since":                    since,
+		"match_count":              count,
+		"threshold":                threshold,
+		"matched_patterns":         matchedPatterns,
+		"success_match_count":      successCount,
+		"matched_success_patterns": matchedSuccessPatterns,
+	}
+	if len(check.SuccessPatterns) > 0 {
+		lastFailureAt, lastSuccessAt, timelineErr := findLatestPatternTimestamps(logText, check.Patterns, check.SuccessPatterns)
+		if timelineErr != nil {
+			return false, timelineErr.Error(), observations
+		}
+		if !lastFailureAt.IsZero() {
+			observations["last_failure_match_at"] = lastFailureAt.UTC().Format(time.RFC3339Nano)
+		}
+		if !lastSuccessAt.IsZero() {
+			observations["last_success_match_at"] = lastSuccessAt.UTC().Format(time.RFC3339Nano)
+		}
+		if count >= threshold && !lastSuccessAt.IsZero() && lastSuccessAt.After(lastFailureAt) {
+			observations["superseded_by_success"] = true
+			return true, "", observations
+		}
 	}
 	if count >= threshold {
 		return false, fmt.Sprintf("docker log pattern matched %d times in %s", count, since), observations
@@ -558,6 +580,65 @@ func countPatternMatches(logText string, patterns []string) (int, []string, erro
 		}
 	}
 	return matchCount, matched, nil
+}
+
+func findLatestPatternTimestamps(logText string, failurePatterns []string, successPatterns []string) (time.Time, time.Time, error) {
+	failureRegexes := make([]*regexp.Regexp, 0, len(failurePatterns))
+	for _, pattern := range failurePatterns {
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("invalid pattern %q: %w", pattern, err)
+		}
+		failureRegexes = append(failureRegexes, re)
+	}
+	successRegexes := make([]*regexp.Regexp, 0, len(successPatterns))
+	for _, pattern := range successPatterns {
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("invalid pattern %q: %w", pattern, err)
+		}
+		successRegexes = append(successRegexes, re)
+	}
+
+	var lastFailureAt time.Time
+	var lastSuccessAt time.Time
+	scanner := bufio.NewScanner(bytes.NewBufferString(logText))
+	for scanner.Scan() {
+		line := scanner.Text()
+		ts, msg, ok := splitDockerTimestampLine(line)
+		if !ok {
+			continue
+		}
+		for _, re := range failureRegexes {
+			if re.MatchString(msg) {
+				if ts.After(lastFailureAt) {
+					lastFailureAt = ts
+				}
+				break
+			}
+		}
+		for _, re := range successRegexes {
+			if re.MatchString(msg) {
+				if ts.After(lastSuccessAt) {
+					lastSuccessAt = ts
+				}
+				break
+			}
+		}
+	}
+	return lastFailureAt, lastSuccessAt, nil
+}
+
+func splitDockerTimestampLine(line string) (time.Time, string, bool) {
+	idx := strings.IndexByte(line, ' ')
+	if idx <= 0 {
+		return time.Time{}, "", false
+	}
+	ts, err := time.Parse(time.RFC3339Nano, line[:idx])
+	if err != nil {
+		return time.Time{}, "", false
+	}
+	return ts, line[idx+1:], true
 }
 
 func matchPatterns(text string, patterns []string, requireAll bool) (bool, error) {

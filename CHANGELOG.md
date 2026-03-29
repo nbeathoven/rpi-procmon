@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - Extend bootstrap so `MA352` and generic systemd service monitors can be configured for local or remote SSH-backed service control.
 - Persist and expose per-monitor target metadata in procmon state and API responses for external dashboards and app clients.
 - Extend the `scrypted-arlo` monitor with a positive plugin-process check and additional Arlo discovery failure signatures, and tune the default log window/threshold for recurring connection failures.
+- Let `docker_log_pattern` checks treat later success markers as overriding earlier failure lines in the same log window, so a successful Arlo re-login/init can clear older log noise without waiting for the full window to expire.
 
 - Fix bootstrap post-install status parsing so procmon API JSON is read correctly and no traceback is printed on successful installs.
 - Bootstrap now reuses an existing compatible Go toolchain and only installs Go when it is missing or too old for the repo `go.mod` requirement.

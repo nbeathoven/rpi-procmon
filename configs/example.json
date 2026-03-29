@@ -70,7 +70,7 @@
         {
           "id": "arlo-plugin-process",
           "type": "command",
-          "command": "docker exec scrypted sh -lc 'pgrep -af \"plugin_remote.py @scrypted/arlo\"'",
+          "command": "docker exec scrypted sh -lc 'ps ax -o args= | grep -F \"plugin_remote.py @scrypted/arlo\" | grep -v grep'",
           "expected_output_patterns": [
             "plugin_remote.py @scrypted/arlo"
           ]
@@ -88,6 +88,11 @@
             "HTTP error 401 .*fullFrameSnapshot",
             "Error discovering devices: Arlo client not connected, cannot discover devices",
             "Error during periodic device discovery: Arlo client not connected, cannot discover devices"
+          ],
+          "success_patterns": [
+            "Arlo Cloud login successful\\.",
+            "Subscribed to Arlo event stream successfully\\.",
+            "Arlo plugin initialized\\."
           ]
         }
       ],
@@ -95,7 +100,7 @@
         {
           "name": "restart-arlo-plugin",
           "type": "command",
-          "command": "docker exec scrypted /bin/sh -lc 'echo set your plugin restart command here && exit 1'"
+          "command": "docker exec scrypted sh -lc 'pkill -f \"plugin_remote.py @scrypted/arlo\" >/dev/null 2>&1; exit 0'"
         },
         {
           "name": "wait-after-plugin-restart",

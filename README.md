@@ -124,6 +124,7 @@ The Scrypted example intentionally ships with a failing placeholder plugin resta
 The built-in `scrypted-arlo` monitor now uses:
 - a positive plugin-process check to confirm `@scrypted/arlo` is present inside the container
 - log-pattern failure detection for recurring Arlo discovery/auth failures
+- success markers such as `Arlo Cloud login successful.`, `Subscribed to Arlo event stream successfully.`, and `Arlo plugin initialized.` to supersede older failure lines still inside the scan window
 
 ## Manual Install Service
 

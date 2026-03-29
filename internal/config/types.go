@@ -55,6 +55,7 @@ type CheckConfig struct {
 	Container               string   `json:"container,omitempty"`
 	Since                   string   `json:"since,omitempty"`
 	Patterns                []string `json:"patterns,omitempty"`
+	SuccessPatterns         []string `json:"success_patterns,omitempty"`
 	MatchCountThreshold     int      `json:"match_count_threshold,omitempty"`
 	Command                 string   `json:"command,omitempty"`
 	Service                 string   `json:"service,omitempty"`

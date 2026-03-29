@@ -422,6 +422,95 @@ func TestRecoveryFlowSupportsRestartSystemdService(t *testing.T) {
 	}
 }
 
+func TestDockerLogSuccessSupersedesEarlierFailures(t *testing.T) {
+	tmpDir := t.TempDir()
+	logCommand := "docker logs --timestamps --since '30m' 'scrypted' 2>&1"
+	runner := &fakeRunner{
+		responses: map[string][]command.Outcome{
+			logCommand: {{
+				Output: strings.Join([]string{
+					"2026-03-29T01:50:13Z [Arlo Provider]: Error discovering devices: Arlo client not connected, cannot discover devices",
+					"2026-03-29T01:50:14Z [Arlo Provider]: Error during periodic device discovery: Arlo client not connected, cannot discover devices",
+					"2026-03-29T02:02:48Z [Arlo Client]: Arlo Cloud login successful.",
+					"2026-03-29T02:02:50Z [Arlo Provider]: Subscribed to Arlo event stream successfully.",
+					"2026-03-29T02:02:56Z [Arlo Provider]: Arlo plugin initialized.",
+				}, "\n"),
+				ExitCode: 0,
+			}},
+		},
+	}
+
+	cfg := config.Config{
+		ConfigFile: filepath.Join(tmpDir, "config.json"),
+		LogFile:    filepath.Join(tmpDir, "procmon.log"),
+		StateFile:  filepath.Join(tmpDir, "state.json"),
+		EventsFile: filepath.Join(tmpDir, "events.json"),
+		API: config.APIConfig{
+			ListenAddress: "127.0.0.1:9645",
+		},
+		Monitors: []config.MonitorConfig{{
+			ID:               "scrypted-arlo",
+			Name:             "Scrypted Arlo",
+			Type:             "docker-log",
+			Interval:         "1m",
+			FailureThreshold: 1,
+			Cooldown:         "1m",
+			Checks: []config.CheckConfig{{
+				ID:                  "arlo-log-errors",
+				Name:                "arlo-log-errors",
+				Type:                "docker_log_pattern",
+				Container:           "scrypted",
+				Since:               "30m",
+				MatchCountThreshold: 2,
+				Patterns: []string{
+					"Error discovering devices: Arlo client not connected, cannot discover devices",
+					"Error during periodic device discovery: Arlo client not connected, cannot discover devices",
+				},
+				SuccessPatterns: []string{
+					"Arlo Cloud login successful\\.",
+					"Subscribed to Arlo event stream successfully\\.",
+					"Arlo plugin initialized\\.",
+				},
+			}},
+			Recovery: []config.ActionConfig{{
+				Name:    "noop",
+				Type:    "command",
+				Command: "true",
+			}},
+		}},
+	}
+
+	logger, closeLog, err := logging.Open(cfg.LogFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeLog()
+
+	manager, err := engine.NewManager(cfg, logger, runner, "test")
+	if err != nil {
+		t.Fatalf("engine.NewManager failed: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager.Start(ctx)
+
+	time.Sleep(50 * time.Millisecond)
+	monitor, ok := manager.MonitorSnapshot("scrypted-arlo")
+	if !ok {
+		t.Fatal("monitor state missing")
+	}
+	if monitor.Status != "healthy" {
+		t.Fatalf("expected healthy status after later success, got %q", monitor.Status)
+	}
+	if len(monitor.LastCheckResults) != 1 {
+		t.Fatalf("expected one check result, got %#v", monitor.LastCheckResults)
+	}
+	if got := monitor.LastCheckResults[0].Observations["superseded_by_success"]; got != true {
+		t.Fatalf("expected superseded_by_success=true, got %#v", monitor.LastCheckResults[0].Observations)
+	}
+}
+
 func TestStatusAPIExposesMonitorState(t *testing.T) {
 	enabled := true
 	cfg := config.Config{

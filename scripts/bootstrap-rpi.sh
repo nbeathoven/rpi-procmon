@@ -323,7 +323,7 @@ elif template == "scrypted_arlo":
             {
                 "id": "arlo-plugin-process",
                 "type": "command",
-                "command": f"docker exec {os.environ['PROC_CONTAINER_NAME']} sh -lc 'pgrep -af \"plugin_remote.py @scrypted/arlo\"'",
+                "command": f"docker exec {os.environ['PROC_CONTAINER_NAME']} sh -lc 'ps ax -o args= | grep -F \"plugin_remote.py @scrypted/arlo\" | grep -v grep'",
                 "expected_output_patterns": [
                     "plugin_remote.py @scrypted/arlo",
                 ],
@@ -341,6 +341,11 @@ elif template == "scrypted_arlo":
                     "HTTP error 401 .*fullFrameSnapshot",
                     "Error discovering devices: Arlo client not connected, cannot discover devices",
                     "Error during periodic device discovery: Arlo client not connected, cannot discover devices",
+                ],
+                "success_patterns": [
+                    "Arlo Cloud login successful\\.",
+                    "Subscribed to Arlo event stream successfully\\.",
+                    "Arlo plugin initialized\\.",
                 ],
             },
         ],
