@@ -50,6 +50,25 @@ func buildSystemdCommand(target config.TargetConfig, remoteCommand string) strin
 		return remoteCommand
 	}
 
+	hosts := targetHosts(target)
+	if len(hosts) == 0 {
+		return remoteCommand
+	}
+
+	if len(hosts) == 1 {
+		return buildSSHCommand(target, hosts[0], remoteCommand)
+	}
+
+	parts := []string{"rc=255"}
+	for _, host := range hosts {
+		sshCommand := buildSSHCommand(target, host, remoteCommand)
+		parts = append(parts, sshCommand+" && exit 0; rc=$?; if [ \"$rc\" -ne 255 ]; then exit \"$rc\"; fi")
+	}
+	parts = append(parts, "exit \"$rc\"")
+	return strings.Join(parts, "; ")
+}
+
+func buildSSHCommand(target config.TargetConfig, host string, remoteCommand string) string {
 	parts := []string{
 		"ssh",
 		"-o", "BatchMode=yes",
@@ -62,13 +81,34 @@ func buildSystemdCommand(target config.TargetConfig, remoteCommand string) strin
 		parts = append(parts, "-i", shellQuote(target.IdentityFile))
 	}
 
-	host := strings.TrimSpace(target.Host)
 	user := strings.TrimSpace(target.User)
 	if user != "" {
 		host = user + "@" + host
 	}
 	parts = append(parts, shellQuote(host), shellQuote(remoteCommand))
 	return strings.Join(parts, " ")
+}
+
+func targetHosts(target config.TargetConfig) []string {
+	hosts := make([]string, 0, 1+len(target.FallbackHosts))
+	seen := map[string]struct{}{}
+	appendHost := func(host string) {
+		host = strings.TrimSpace(host)
+		if host == "" {
+			return
+		}
+		if _, ok := seen[host]; ok {
+			return
+		}
+		seen[host] = struct{}{}
+		hosts = append(hosts, host)
+	}
+
+	appendHost(target.Host)
+	for _, host := range target.FallbackHosts {
+		appendHost(host)
+	}
+	return hosts
 }
 
 func shellQuote(value string) string {

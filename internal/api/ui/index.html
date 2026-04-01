@@ -971,7 +971,13 @@
       const target = monitor && monitor.target ? monitor.target : {};
       const transport = (target.transport || "local").trim() || "local";
       const host = (target.host || "").trim();
+      const fallbackHosts = Array.isArray(target.fallback_hosts)
+        ? target.fallback_hosts.map((value) => String(value || "").trim()).filter(Boolean)
+        : [];
       if (transport === "ssh" && host) {
+        if (fallbackHosts.length) {
+          return `Remote ${host} (fallback ${fallbackHosts.join(", ")})`;
+        }
         return `Remote ${host}`;
       }
       return "Local host";

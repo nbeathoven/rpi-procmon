@@ -25,7 +25,7 @@
 
 Each monitor has its own:
 - identity: `id`, `name`, `type`
-- target: `target.transport`, `target.host`, `target.user`, `target.port`
+- target: `target.transport`, `target.host`, `target.fallback_hosts`, `target.user`, `target.port`
 - schedule: `interval`
 - policy: `failure_threshold`, `cooldown`
 - `checks[]`

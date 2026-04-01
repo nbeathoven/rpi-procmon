@@ -95,7 +95,7 @@ func CloneMonitorState(in *MonitorRuntimeState) *MonitorRuntimeState {
 		return nil
 	}
 	out := *in
-	out.Target = in.Target
+	out.Target = cloneTargetConfig(in.Target)
 	out.Metadata = cloneStringMap(in.Metadata)
 	out.ConfiguredChecks = cloneCheckConfigs(in.ConfiguredChecks)
 	out.ConfiguredRecoveries = cloneActionConfigs(in.ConfiguredRecoveries)
@@ -103,6 +103,12 @@ func CloneMonitorState(in *MonitorRuntimeState) *MonitorRuntimeState {
 	out.LastCheckResults = CloneCheckResults(in.LastCheckResults)
 	out.LastRecoveryResults = CloneActionResults(in.LastRecoveryResults)
 	return &out
+}
+
+func cloneTargetConfig(in config.TargetConfig) config.TargetConfig {
+	out := in
+	out.FallbackHosts = append([]string(nil), in.FallbackHosts...)
+	return out
 }
 
 func CloneCheckResults(in []CheckResult) []CheckResult {

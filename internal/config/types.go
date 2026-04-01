@@ -16,11 +16,12 @@ type APIConfig struct {
 }
 
 type TargetConfig struct {
-	Transport    string `json:"transport,omitempty"`
-	Host         string `json:"host,omitempty"`
-	User         string `json:"user,omitempty"`
-	Port         int    `json:"port,omitempty"`
-	IdentityFile string `json:"identity_file,omitempty"`
+	Transport     string   `json:"transport,omitempty"`
+	Host          string   `json:"host,omitempty"`
+	FallbackHosts []string `json:"fallback_hosts,omitempty"`
+	User          string   `json:"user,omitempty"`
+	Port          int      `json:"port,omitempty"`
+	IdentityFile  string   `json:"identity_file,omitempty"`
 }
 
 type MonitorConfig struct {

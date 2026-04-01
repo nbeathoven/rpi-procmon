@@ -209,7 +209,8 @@ Each monitor defines:
 
 The optional `target` object identifies where service control happens:
 - `transport`: `local` or `ssh`
-- `host`: remote host/IP for SSH-backed service control
+- `host`: preferred remote host/IP for SSH-backed service control
+- `fallback_hosts`: optional SSH fallback hostnames or IPs, tried in order after `host` if SSH transport fails
 - `user`: SSH user
 - `port`: SSH port
 - `identity_file`: SSH identity file path on the procmon host

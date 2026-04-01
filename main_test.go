@@ -273,7 +273,7 @@ func TestLoadConfigSupportsSSHTargetAndSystemdTypes(t *testing.T) {
     "interval":"1m",
     "failure_threshold":1,
     "cooldown":"15m",
-    "target":{"transport":"ssh","host":"192.168.5.163","user":"nima","port":22,"identity_file":"/home/nima/.ssh/id_ed25519"},
+    "target":{"transport":"ssh","host":"Epcilon.local","fallback_hosts":["192.168.5.163"],"user":"nima","port":22,"identity_file":"/home/nima/.ssh/id_ed25519"},
     "checks":[
       {"id":"svc","type":"systemd_service","service":"ma352-bridge"},
       {"id":"health","type":"http_json","url":"http://192.168.5.163:5000/health","require_ok":true,"require_serial_connected":true}
@@ -294,7 +294,7 @@ func TestLoadConfigSupportsSSHTargetAndSystemdTypes(t *testing.T) {
 	}
 
 	monitor := cfg.Monitors[0]
-	if monitor.Target.Transport != "ssh" || monitor.Target.Host != "192.168.5.163" {
+	if monitor.Target.Transport != "ssh" || monitor.Target.Host != "Epcilon.local" || len(monitor.Target.FallbackHosts) != 1 || monitor.Target.FallbackHosts[0] != "192.168.5.163" {
 		t.Fatalf("unexpected target %#v", monitor.Target)
 	}
 	if len(monitor.Checks) != 2 || monitor.Checks[0].Type != "systemd_service" {
@@ -312,20 +312,21 @@ func TestBuildSystemdCommandsRespectTargetTransport(t *testing.T) {
 	}
 
 	sshTarget := config.TargetConfig{
-		Transport:    "ssh",
-		Host:         "192.168.5.163",
-		User:         "nima",
-		Port:         22,
-		IdentityFile: "/home/nima/.ssh/id_ed25519",
+		Transport:     "ssh",
+		Host:          "Epcilon.local",
+		FallbackHosts: []string{"192.168.5.163"},
+		User:          "nima",
+		Port:          22,
+		IdentityFile:  "/home/nima/.ssh/id_ed25519",
 	}
 
 	remoteCheck := command.BuildSystemdIsActiveCommand(sshTarget, "ma352-bridge")
-	if !strings.Contains(remoteCheck, "ssh") || !strings.Contains(remoteCheck, "nima@192.168.5.163") || !strings.Contains(remoteCheck, "systemctl is-active --quiet") {
+	if !strings.Contains(remoteCheck, "ssh") || !strings.Contains(remoteCheck, "nima@Epcilon.local") || !strings.Contains(remoteCheck, "nima@192.168.5.163") || !strings.Contains(remoteCheck, "systemctl is-active --quiet") {
 		t.Fatalf("unexpected remote check command %q", remoteCheck)
 	}
 
 	remoteRestart := command.BuildSystemdRestartCommand(sshTarget, "ma352-bridge")
-	if !strings.Contains(remoteRestart, "sudo -n systemctl restart") || !strings.Contains(remoteRestart, "nima@192.168.5.163") {
+	if !strings.Contains(remoteRestart, "sudo -n systemctl restart") || !strings.Contains(remoteRestart, "nima@Epcilon.local") || !strings.Contains(remoteRestart, "nima@192.168.5.163") {
 		t.Fatalf("unexpected remote restart command %q", remoteRestart)
 	}
 }

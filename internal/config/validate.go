@@ -37,6 +37,11 @@ func validateTarget(monitorID string, target TargetConfig) error {
 		if strings.TrimSpace(target.Host) == "" {
 			return fmt.Errorf("monitor %q target with transport ssh missing host", monitorID)
 		}
+		for _, host := range target.FallbackHosts {
+			if strings.TrimSpace(host) == "" {
+				return fmt.Errorf("monitor %q target has empty fallback host", monitorID)
+			}
+		}
 		if target.Port < 0 {
 			return fmt.Errorf("monitor %q target port %d is invalid", monitorID, target.Port)
 		}
