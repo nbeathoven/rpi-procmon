@@ -33,6 +33,7 @@ var registry = map[string]Handler{
 	"io_paths":           runIOPaths,
 	"docker_container":   runDockerContainer,
 	"docker_log_pattern": runDockerLogPattern,
+	"docker_exec":        runDockerExec,
 	"command":            runCommand,
 	"systemd_service":    runSystemdService,
 }
@@ -240,17 +241,19 @@ func runIOPaths(_ context.Context, _ command.Runner, _ config.MonitorConfig, che
 	return true, "", map[string]any{"paths_checked": len(check.Paths)}
 }
 
-func runDockerContainer(ctx context.Context, runner command.Runner, _ config.MonitorConfig, check config.CheckConfig) (bool, string, map[string]any) {
+func runDockerContainer(ctx context.Context, runner command.Runner, monitor config.MonitorConfig, check config.CheckConfig) (bool, string, map[string]any) {
 	if strings.TrimSpace(check.Container) == "" {
 		return false, "docker_container check missing container", nil
 	}
-	cmd := fmt.Sprintf("docker inspect -f '{{.State.Running}}' %s", shellQuote(check.Container))
+	cmd := command.BuildDockerInspectRunningCommand(monitor.Target, check.Container)
 	outcome, err := runner.Run(ctx, cmd)
 	running := strings.TrimSpace(outcome.Output) == "true"
 	observations := map[string]any{
 		"container": check.Container,
 		"running":   running,
 		"exit_code": outcome.ExitCode,
+		"transport": normalizedTransport(monitor.Target.Transport),
+		"host":      strings.TrimSpace(monitor.Target.Host),
 	}
 	if err != nil || !running {
 		return false, fmt.Sprintf("container %s not running", check.Container), observations
@@ -258,7 +261,7 @@ func runDockerContainer(ctx context.Context, runner command.Runner, _ config.Mon
 	return true, "", observations
 }
 
-func runDockerLogPattern(ctx context.Context, runner command.Runner, _ config.MonitorConfig, check config.CheckConfig) (bool, string, map[string]any) {
+func runDockerLogPattern(ctx context.Context, runner command.Runner, monitor config.MonitorConfig, check config.CheckConfig) (bool, string, map[string]any) {
 	if strings.TrimSpace(check.Container) == "" {
 		return false, "docker_log_pattern check missing container", nil
 	}
@@ -266,7 +269,7 @@ func runDockerLogPattern(ctx context.Context, runner command.Runner, _ config.Mo
 	if strings.TrimSpace(since) == "" {
 		since = "10m"
 	}
-	cmd := fmt.Sprintf("docker logs --timestamps --since %s %s 2>&1", shellQuote(since), shellQuote(check.Container))
+	cmd := command.BuildDockerLogsCommand(monitor.Target, check.Container, since)
 	outcome, err := runner.Run(ctx, cmd)
 	logText := outcome.Output
 	if err != nil && strings.TrimSpace(logText) == "" {
@@ -292,6 +295,8 @@ func runDockerLogPattern(ctx context.Context, runner command.Runner, _ config.Mo
 		"matched_patterns":         matchedPatterns,
 		"success_match_count":      successCount,
 		"matched_success_patterns": matchedSuccessPatterns,
+		"transport":                normalizedTransport(monitor.Target.Transport),
+		"host":                     strings.TrimSpace(monitor.Target.Host),
 	}
 	if len(check.SuccessPatterns) > 0 {
 		lastFailureAt, lastSuccessAt, timelineErr := findLatestPatternTimestamps(logText, check.Patterns, check.SuccessPatterns)
@@ -311,6 +316,51 @@ func runDockerLogPattern(ctx context.Context, runner command.Runner, _ config.Mo
 	}
 	if count >= threshold {
 		return false, fmt.Sprintf("docker log pattern matched %d times in %s", count, since), observations
+	}
+	return true, "", observations
+}
+
+func runDockerExec(ctx context.Context, runner command.Runner, monitor config.MonitorConfig, check config.CheckConfig) (bool, string, map[string]any) {
+	if strings.TrimSpace(check.Container) == "" {
+		return false, "docker_exec check missing container", nil
+	}
+	if strings.TrimSpace(check.DockerCommand) == "" {
+		return false, "docker_exec check missing docker_command", nil
+	}
+	cmd := command.BuildDockerExecCommand(monitor.Target, check.Container, check.DockerCommand)
+	outcome, err := runner.Run(ctx, cmd)
+	output := limitString(outcome.Output, 2048)
+	observations := map[string]any{
+		"container": check.Container,
+		"exit_code": outcome.ExitCode,
+		"output":    output,
+		"transport": normalizedTransport(monitor.Target.Transport),
+		"host":      strings.TrimSpace(monitor.Target.Host),
+	}
+	expectedExitCode := check.ExpectedExitCode
+	if outcome.ExitCode != expectedExitCode {
+		return false, fmt.Sprintf("docker_exec exit code %d != %d", outcome.ExitCode, expectedExitCode), observations
+	}
+	if err != nil && outcome.ExitCode != expectedExitCode {
+		return false, fmt.Sprintf("docker_exec failed with exit code %d", outcome.ExitCode), observations
+	}
+	if len(check.ExpectedOutputPatterns) > 0 {
+		matched, err := matchPatterns(output, check.ExpectedOutputPatterns, check.MatchAll)
+		if err != nil {
+			return false, err.Error(), observations
+		}
+		if !matched {
+			return false, "docker_exec output missing expected pattern", observations
+		}
+	}
+	if len(check.ForbiddenOutputPatterns) > 0 {
+		matched, err := matchPatterns(output, check.ForbiddenOutputPatterns, false)
+		if err != nil {
+			return false, err.Error(), observations
+		}
+		if matched {
+			return false, "docker_exec output matched forbidden pattern", observations
+		}
 	}
 	return true, "", observations
 }

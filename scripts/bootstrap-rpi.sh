@@ -272,13 +272,21 @@ if template == "ma352":
     }
     upsert(monitor)
 elif template == "scrypted_arlo":
+    target = {
+        "transport": os.environ.get("PROC_TARGET_TRANSPORT", "local"),
+        "host": os.environ.get("PROC_TARGET_HOST", ""),
+        "user": os.environ.get("PROC_TARGET_USER", ""),
+        "port": int(os.environ.get("PROC_TARGET_PORT", "0") or "0"),
+        "identity_file": os.environ.get("PROC_TARGET_IDENTITY_FILE", ""),
+    }
     recovery = []
     plugin_cmd = os.environ.get("PROC_PLUGIN_RESTART_CMD", "").strip()
     if plugin_cmd:
         recovery.extend([
             {
                 "name": "restart-arlo-plugin",
-                "type": "command",
+                "type": "docker_exec",
+                "container": os.environ["PROC_CONTAINER_NAME"],
                 "command": plugin_cmd,
             },
             {
@@ -294,8 +302,8 @@ elif template == "scrypted_arlo":
     recovery.extend([
         {
             "name": "restart-scrypted-container",
-            "type": "command",
-            "command": f"docker restart {os.environ['PROC_CONTAINER_NAME']}",
+            "type": "restart_docker_container",
+            "container": os.environ["PROC_CONTAINER_NAME"],
         },
         {
             "name": "wait-after-container-restart",
@@ -314,6 +322,7 @@ elif template == "scrypted_arlo":
         "interval": os.environ["PROC_INTERVAL"],
         "failure_threshold": 1,
         "cooldown": os.environ["PROC_COOLDOWN"],
+        "target": target,
         "checks": [
             {
                 "id": "scrypted-running",
@@ -322,8 +331,9 @@ elif template == "scrypted_arlo":
             },
             {
                 "id": "arlo-plugin-process",
-                "type": "command",
-                "command": f"docker exec {os.environ['PROC_CONTAINER_NAME']} sh -lc 'ps ax -o args= | grep -F \"plugin_remote.py @scrypted/arlo\" | grep -v grep'",
+                "type": "docker_exec",
+                "container": os.environ["PROC_CONTAINER_NAME"],
+                "docker_command": "ps ax -o args= | grep -F \"plugin_remote.py @scrypted/arlo\" | grep -v grep",
                 "expected_output_patterns": [
                     "plugin_remote.py @scrypted/arlo",
                 ],
@@ -780,12 +790,29 @@ add_ma352_monitor() {
 
 add_scrypted_arlo_monitor() {
   local container_name interval cooldown log_since match_threshold plugin_restart_cmd recovery_target
+  local service_host target_transport ssh_user ssh_port ssh_identity_file
   echo
   echo "Scrypted Arlo monitor setup:"
   echo "  - Log scan window: how far back procmon scans Scrypted logs, for example 30m or 1h."
   echo "  - Failure threshold: how many matching Arlo error lines inside that window trigger recovery."
   echo "  - Primary recovery target: default is plugin restart first."
   echo "    Type scrypted if you want container restart to be the first recovery action instead."
+  service_host="$(prompt_default "Scrypted host/IP" "127.0.0.1")"
+  if [[ "$service_host" == "127.0.0.1" || "$service_host" == "localhost" ]]; then
+    target_transport="local"
+  else
+    target_transport="ssh"
+  fi
+  target_transport="$(prompt_default "Scrypted control transport (local or ssh)" "$target_transport")"
+  target_transport="$(printf '%s' "$target_transport" | tr '[:upper:]' '[:lower:]')"
+  ssh_user=""
+  ssh_port="22"
+  ssh_identity_file=""
+  if [[ "$target_transport" == "ssh" ]]; then
+    ssh_user="$(prompt_default "Scrypted SSH user" "nima")"
+    ssh_port="$(prompt_default "Scrypted SSH port" "22")"
+    ssh_identity_file="$(prompt_default "Scrypted SSH identity file on procmon host" "/home/nima/.ssh/id_ed25519")"
+  fi
   container_name="$(prompt_default "Scrypted container name" "scrypted")"
   interval="$(prompt_default "Scrypted Arlo check interval" "5m")"
   cooldown="$(prompt_default "Scrypted Arlo recovery cooldown" "20m")"
@@ -810,6 +837,15 @@ add_scrypted_arlo_monitor() {
 
   export PROC_TEMPLATE="scrypted_arlo"
   export PROC_CONTAINER_NAME="$container_name"
+  export PROC_TARGET_TRANSPORT="$target_transport"
+  if [[ "$target_transport" == "ssh" ]]; then
+    export PROC_TARGET_HOST="$service_host"
+  else
+    export PROC_TARGET_HOST=""
+  fi
+  export PROC_TARGET_USER="$ssh_user"
+  export PROC_TARGET_PORT="$ssh_port"
+  export PROC_TARGET_IDENTITY_FILE="$ssh_identity_file"
   export PROC_INTERVAL="$interval"
   export PROC_COOLDOWN="$cooldown"
   export PROC_LOG_SINCE="$log_since"

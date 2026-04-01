@@ -8,7 +8,7 @@
 - Supports service-specific checks such as HTTP health, Docker container state, Docker log pattern matching, command checks, system load, memory, I/O pressure, and file path access.
 - Persists per-monitor runtime state including last check times, last failures, last recoveries, cooldowns, counters, and detailed check/action results.
 - Persists a queryable event history for failures and recovery actions so external apps can pull recent monitor activity without scraping logs.
-- Supports target-aware monitors so a central procmon host can monitor and recover local or remote systemd services.
+- Supports target-aware monitors so a central procmon host can monitor and recover local or remote systemd services and Docker-backed services.
 - Exposes API endpoints for external apps:
   - `GET /health`
   - `GET /status`
@@ -122,9 +122,10 @@ sudo cp systemd/rpi-procmon.env.example /etc/default/rpi-procmon
 The Scrypted example intentionally ships with a failing placeholder plugin restart command. Replace it with your real Arlo plugin restart command before enabling automated recovery.
 
 The built-in `scrypted-arlo` monitor now uses:
-- a positive plugin-process check to confirm `@scrypted/arlo` is present inside the container
+- a target-aware `docker_exec` plugin-process check to confirm `@scrypted/arlo` is present inside the container
 - log-pattern failure detection for recurring Arlo discovery/auth failures
 - success markers such as `Arlo Cloud login successful.`, `Subscribed to Arlo event stream successfully.`, and `Arlo plugin initialized.` to supersede older failure lines still inside the scan window
+- a typed `restart_docker_container` recovery step so the same template can work against a remote Scrypted host over SSH
 
 ## Manual Install Service
 
@@ -223,13 +224,16 @@ Checks currently supported:
 - `io_paths`
 - `docker_container`
 - `docker_log_pattern`
+- `docker_exec`
 - `command`
 - `systemd_service`
 
 Recovery steps currently supported:
 - `command`
+- `docker_exec`
 - `sleep`
 - `recheck`
+- `restart_docker_container`
 - `restart_systemd_service`
 
 Config validation is strict. Invalid monitor ids, duplicate check ids, unsupported check or recovery types, missing required fields, and invalid durations fail fast at startup.

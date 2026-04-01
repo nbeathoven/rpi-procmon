@@ -44,7 +44,30 @@ func BuildSystemdRestartCommand(target config.TargetConfig, service string) stri
 	return buildSystemdCommand(target, command)
 }
 
+func BuildDockerInspectRunningCommand(target config.TargetConfig, container string) string {
+	return buildRemoteCommand(target, "docker inspect -f '{{.State.Running}}' "+shellQuote(container))
+}
+
+func BuildDockerLogsCommand(target config.TargetConfig, container string, since string) string {
+	return buildRemoteCommand(target, "docker logs --timestamps --since "+shellQuote(since)+" "+shellQuote(container)+" 2>&1")
+}
+
+func BuildDockerExecCommand(target config.TargetConfig, container string, dockerCommand string) string {
+	return buildRemoteCommand(target, "docker exec "+shellQuote(container)+" sh -lc "+shellQuote(dockerCommand))
+}
+
+func BuildDockerRestartCommand(target config.TargetConfig, container string) string {
+	return buildRemoteCommand(target, "docker restart "+shellQuote(container))
+}
+
 func buildSystemdCommand(target config.TargetConfig, remoteCommand string) string {
+	if strings.TrimSpace(target.Transport) == "ssh" {
+		return buildRemoteCommand(target, remoteCommand)
+	}
+	return remoteCommand
+}
+
+func buildRemoteCommand(target config.TargetConfig, remoteCommand string) string {
 	transport := strings.TrimSpace(target.Transport)
 	if transport == "" || transport == "local" {
 		return remoteCommand

@@ -331,6 +331,37 @@ func TestBuildSystemdCommandsRespectTargetTransport(t *testing.T) {
 	}
 }
 
+func TestBuildDockerCommandsRespectTargetTransport(t *testing.T) {
+	sshTarget := config.TargetConfig{
+		Transport:     "ssh",
+		Host:          "ScryptedHost.local",
+		FallbackHosts: []string{"192.168.5.50"},
+		User:          "nima",
+		Port:          22,
+		IdentityFile:  "/home/nima/.ssh/id_ed25519",
+	}
+
+	inspectCommand := command.BuildDockerInspectRunningCommand(sshTarget, "scrypted")
+	if !strings.Contains(inspectCommand, "nima@ScryptedHost.local") || !strings.Contains(inspectCommand, "nima@192.168.5.50") || !strings.Contains(inspectCommand, "docker inspect -f") {
+		t.Fatalf("unexpected docker inspect command %q", inspectCommand)
+	}
+
+	logsCommand := command.BuildDockerLogsCommand(sshTarget, "scrypted", "30m")
+	if !strings.Contains(logsCommand, "docker logs --timestamps --since") || !strings.Contains(logsCommand, "scrypted") || !strings.Contains(logsCommand, "30m") {
+		t.Fatalf("unexpected docker logs command %q", logsCommand)
+	}
+
+	execCommand := command.BuildDockerExecCommand(sshTarget, "scrypted", "echo ok")
+	if !strings.Contains(execCommand, "docker exec") || !strings.Contains(execCommand, "scrypted") || !strings.Contains(execCommand, "echo ok") {
+		t.Fatalf("unexpected docker exec command %q", execCommand)
+	}
+
+	restartCommand := command.BuildDockerRestartCommand(sshTarget, "scrypted")
+	if !strings.Contains(restartCommand, "docker restart") || !strings.Contains(restartCommand, "scrypted") {
+		t.Fatalf("unexpected docker restart command %q", restartCommand)
+	}
+}
+
 func TestRecoveryFlowSupportsRestartSystemdService(t *testing.T) {
 	tmpDir := t.TempDir()
 	sshTarget := config.TargetConfig{
@@ -416,6 +447,96 @@ func TestRecoveryFlowSupportsRestartSystemdService(t *testing.T) {
 		t.Fatalf("expected recovered healthy status, got %q", monitor.Status)
 	}
 	if monitor.Target.Transport != "ssh" || monitor.Target.Host != "192.168.5.163" {
+		t.Fatalf("expected target to persist, got %#v", monitor.Target)
+	}
+	if monitor.RecoveryCount != 1 {
+		t.Fatalf("expected one recovery, got %d", monitor.RecoveryCount)
+	}
+}
+
+func TestRecoveryFlowSupportsRestartDockerContainer(t *testing.T) {
+	tmpDir := t.TempDir()
+	sshTarget := config.TargetConfig{
+		Transport:    "ssh",
+		Host:         "192.168.5.50",
+		User:         "nima",
+		Port:         22,
+		IdentityFile: "/home/nima/.ssh/id_ed25519",
+	}
+	checkCommand := command.BuildDockerInspectRunningCommand(sshTarget, "scrypted")
+	restartCommand := command.BuildDockerRestartCommand(sshTarget, "scrypted")
+
+	runner := &fakeRunner{
+		responses: map[string][]command.Outcome{
+			checkCommand: {
+				{Output: "false", ExitCode: 1},
+				{Output: "true", ExitCode: 0},
+			},
+			restartCommand: {
+				{Output: "scrypted", ExitCode: 0},
+			},
+		},
+		errors: map[string][]error{
+			checkCommand:   {errors.New("not running"), nil},
+			restartCommand: {nil},
+		},
+	}
+
+	cfg := config.Config{
+		ConfigFile: filepath.Join(tmpDir, "config.json"),
+		LogFile:    filepath.Join(tmpDir, "procmon.log"),
+		StateFile:  filepath.Join(tmpDir, "state.json"),
+		EventsFile: filepath.Join(tmpDir, "events.json"),
+		API:        config.APIConfig{ListenAddress: "127.0.0.1:9645"},
+		Monitors: []config.MonitorConfig{{
+			ID:               "scrypted",
+			Name:             "Scrypted",
+			Type:             "docker-container",
+			Interval:         "1m",
+			FailureThreshold: 1,
+			Cooldown:         "1m",
+			Target:           sshTarget,
+			Checks: []config.CheckConfig{{
+				ID:        "running",
+				Name:      "running",
+				Type:      "docker_container",
+				Container: "scrypted",
+			}},
+			Recovery: []config.ActionConfig{{
+				Name:      "restart",
+				Type:      "restart_docker_container",
+				Container: "scrypted",
+			}, {
+				Name: "recheck",
+				Type: "recheck",
+			}},
+		}},
+	}
+
+	logger, closeLog, err := logging.Open(cfg.LogFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeLog()
+
+	manager, err := engine.NewManager(cfg, logger, runner, "test")
+	if err != nil {
+		t.Fatalf("engine.NewManager failed: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager.Start(ctx)
+
+	time.Sleep(50 * time.Millisecond)
+	monitor, ok := manager.MonitorSnapshot("scrypted")
+	if !ok {
+		t.Fatal("monitor state missing")
+	}
+	if monitor.Status != "healthy" {
+		t.Fatalf("expected recovered healthy status, got %q", monitor.Status)
+	}
+	if monitor.Target.Host != "192.168.5.50" {
 		t.Fatalf("expected target to persist, got %#v", monitor.Target)
 	}
 	if monitor.RecoveryCount != 1 {

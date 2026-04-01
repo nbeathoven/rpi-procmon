@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 - Extend the `scrypted-arlo` monitor with a positive plugin-process check and additional Arlo discovery failure signatures, and tune the default log window/threshold for recurring connection failures.
 - Let `docker_log_pattern` checks treat later success markers as overriding earlier failure lines in the same log window, so a successful Arlo re-login/init can clear older log noise without waiting for the full window to expire.
 - Allow SSH-backed monitors to prefer a hostname and fall back to one or more IPs if name resolution or transport connectivity fails.
+- Add target-aware Docker checks and recovery steps so templates like `scrypted-arlo` can keep working when the monitored container moves to another host.
 
 - Fix bootstrap post-install status parsing so procmon API JSON is read correctly and no traceback is printed on successful installs.
 - Bootstrap now reuses an existing compatible Go toolchain and only installs Go when it is missing or too old for the repo `go.mod` requirement.

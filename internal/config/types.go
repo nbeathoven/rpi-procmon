@@ -54,6 +54,7 @@ type CheckConfig struct {
 	Paths                   []string `json:"paths,omitempty"`
 	AllowProcesses          []string `json:"allow_processes,omitempty"`
 	Container               string   `json:"container,omitempty"`
+	DockerCommand           string   `json:"docker_command,omitempty"`
 	Since                   string   `json:"since,omitempty"`
 	Patterns                []string `json:"patterns,omitempty"`
 	SuccessPatterns         []string `json:"success_patterns,omitempty"`
@@ -67,11 +68,12 @@ type CheckConfig struct {
 }
 
 type ActionConfig struct {
-	Name     string `json:"name,omitempty"`
-	Type     string `json:"type"`
-	Command  string `json:"command,omitempty"`
-	Service  string `json:"service,omitempty"`
-	Duration string `json:"duration,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Type      string `json:"type"`
+	Command   string `json:"command,omitempty"`
+	Service   string `json:"service,omitempty"`
+	Container string `json:"container,omitempty"`
+	Duration  string `json:"duration,omitempty"`
 }
 
 func (m MonitorConfig) IsEnabled() bool {

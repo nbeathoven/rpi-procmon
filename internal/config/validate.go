@@ -14,15 +14,18 @@ var supportedCheckTypes = map[string]struct{}{
 	"io_paths":           {},
 	"docker_container":   {},
 	"docker_log_pattern": {},
+	"docker_exec":        {},
 	"command":            {},
 	"systemd_service":    {},
 }
 
 var supportedActionTypes = map[string]struct{}{
-	"command":                 {},
-	"sleep":                   {},
-	"recheck":                 {},
-	"restart_systemd_service": {},
+	"command":                  {},
+	"docker_exec":              {},
+	"sleep":                    {},
+	"recheck":                  {},
+	"restart_docker_container": {},
+	"restart_systemd_service":  {},
 }
 
 func validateTarget(monitorID string, target TargetConfig) error {
@@ -82,6 +85,13 @@ func validateCheck(monitorID string, check CheckConfig) error {
 				return fmt.Errorf("monitor %q check %q since %q is invalid: %w", monitorID, check.ID, check.Since, err)
 			}
 		}
+	case "docker_exec":
+		if strings.TrimSpace(check.Container) == "" {
+			return fmt.Errorf("monitor %q check %q missing container", monitorID, check.ID)
+		}
+		if strings.TrimSpace(check.DockerCommand) == "" {
+			return fmt.Errorf("monitor %q check %q missing docker_command", monitorID, check.ID)
+		}
 	case "io_paths":
 		if len(check.Paths) == 0 {
 			return fmt.Errorf("monitor %q check %q has no paths", monitorID, check.ID)
@@ -112,6 +122,17 @@ func validateAction(monitorID string, action ActionConfig) error {
 	case "restart_systemd_service":
 		if strings.TrimSpace(action.Service) == "" {
 			return fmt.Errorf("monitor %q recovery action %q missing service", monitorID, action.Name)
+		}
+	case "restart_docker_container":
+		if strings.TrimSpace(action.Container) == "" {
+			return fmt.Errorf("monitor %q recovery action %q missing container", monitorID, action.Name)
+		}
+	case "docker_exec":
+		if strings.TrimSpace(action.Container) == "" {
+			return fmt.Errorf("monitor %q recovery action %q missing container", monitorID, action.Name)
+		}
+		if strings.TrimSpace(action.Command) == "" {
+			return fmt.Errorf("monitor %q recovery action %q missing command", monitorID, action.Name)
 		}
 	case "sleep":
 		if strings.TrimSpace(action.Duration) == "" {

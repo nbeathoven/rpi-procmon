@@ -61,6 +61,9 @@
       "interval": "5m",
       "failure_threshold": 1,
       "cooldown": "20m",
+      "target": {
+        "transport": "local"
+      },
       "checks": [
         {
           "id": "scrypted-running",
@@ -69,8 +72,9 @@
         },
         {
           "id": "arlo-plugin-process",
-          "type": "command",
-          "command": "docker exec scrypted sh -lc 'ps ax -o args= | grep -F \"plugin_remote.py @scrypted/arlo\" | grep -v grep'",
+          "type": "docker_exec",
+          "container": "scrypted",
+          "docker_command": "ps ax -o args= | grep -F \"plugin_remote.py @scrypted/arlo\" | grep -v grep",
           "expected_output_patterns": [
             "plugin_remote.py @scrypted/arlo"
           ]
@@ -99,8 +103,9 @@
       "recovery": [
         {
           "name": "restart-arlo-plugin",
-          "type": "command",
-          "command": "docker exec scrypted sh -lc 'pkill -f \"plugin_remote.py @scrypted/arlo\" >/dev/null 2>&1; exit 0'"
+          "type": "docker_exec",
+          "container": "scrypted",
+          "command": "pkill -f \"plugin_remote.py @scrypted/arlo\" >/dev/null 2>&1; exit 0"
         },
         {
           "name": "wait-after-plugin-restart",
@@ -113,8 +118,8 @@
         },
         {
           "name": "restart-scrypted-container",
-          "type": "command",
-          "command": "docker restart scrypted"
+          "type": "restart_docker_container",
+          "container": "scrypted"
         },
         {
           "name": "wait-after-container-restart",

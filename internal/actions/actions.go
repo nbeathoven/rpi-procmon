@@ -14,10 +14,12 @@ import (
 type Handler func(context.Context, command.Runner, config.MonitorConfig, config.ActionConfig) (bool, string, string)
 
 var registry = map[string]Handler{
-	"command":                 runCommand,
-	"sleep":                   runSleep,
-	"recheck":                 runRecheck,
-	"restart_systemd_service": runRestartSystemdService,
+	"command":                  runCommand,
+	"docker_exec":              runDockerExec,
+	"sleep":                    runSleep,
+	"recheck":                  runRecheck,
+	"restart_docker_container": runRestartDockerContainer,
+	"restart_systemd_service":  runRestartSystemdService,
 }
 
 func Run(ctx context.Context, runner command.Runner, monitor config.MonitorConfig, action config.ActionConfig) state.ActionResult {
@@ -59,6 +61,21 @@ func runCommand(ctx context.Context, runner command.Runner, _ config.MonitorConf
 	return true, "", output
 }
 
+func runDockerExec(ctx context.Context, runner command.Runner, monitor config.MonitorConfig, action config.ActionConfig) (bool, string, string) {
+	if strings.TrimSpace(action.Container) == "" {
+		return false, "docker_exec action missing container", ""
+	}
+	if strings.TrimSpace(action.Command) == "" {
+		return false, "docker_exec action missing command", ""
+	}
+	outcome, err := runner.Run(ctx, command.BuildDockerExecCommand(monitor.Target, action.Container, action.Command))
+	output := limitString(outcome.Output, 2048)
+	if err != nil {
+		return false, fmt.Sprintf("docker_exec failed with exit code %d", outcome.ExitCode), output
+	}
+	return true, "", output
+}
+
 func runSleep(ctx context.Context, _ command.Runner, _ config.MonitorConfig, action config.ActionConfig) (bool, string, string) {
 	duration := parseDuration(action.Duration, 5*time.Second)
 	timer := time.NewTimer(duration)
@@ -84,6 +101,19 @@ func runRestartSystemdService(ctx context.Context, runner command.Runner, monito
 	output := limitString(outcome.Output, 2048)
 	if err != nil {
 		return false, fmt.Sprintf("restart_systemd_service failed with exit code %d", outcome.ExitCode), output
+	}
+	return true, "", output
+}
+
+func runRestartDockerContainer(ctx context.Context, runner command.Runner, monitor config.MonitorConfig, action config.ActionConfig) (bool, string, string) {
+	container := strings.TrimSpace(action.Container)
+	if container == "" {
+		return false, "restart_docker_container missing container", ""
+	}
+	outcome, err := runner.Run(ctx, command.BuildDockerRestartCommand(monitor.Target, container))
+	output := limitString(outcome.Output, 2048)
+	if err != nil {
+		return false, fmt.Sprintf("restart_docker_container failed with exit code %d", outcome.ExitCode), output
 	}
 	return true, "", output
 }
