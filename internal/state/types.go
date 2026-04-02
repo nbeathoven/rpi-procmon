@@ -71,23 +71,24 @@ type ActionResult struct {
 }
 
 type ProcmonStatus struct {
-	AppVersion      string                 `json:"app_version"`
-	StartedAt       string                 `json:"started_at"`
-	UptimeSeconds   int64                  `json:"uptime_seconds"`
-	OverallStatus   string                 `json:"overall_status"`
-	MonitorCount    int                    `json:"monitor_count"`
-	HealthyCount    int                    `json:"healthy_count"`
-	DegradedCount   int                    `json:"degraded_count"`
-	RecoveringCount int                    `json:"recovering_count"`
-	FailedCount     int                    `json:"failed_count"`
-	DisabledCount   int                    `json:"disabled_count"`
-	ConfigFile      string                 `json:"config_file"`
-	StateFile       string                 `json:"state_file"`
-	EventsFile      string                 `json:"events_file"`
-	LogFile         string                 `json:"log_file"`
-	ListenAddress   string                 `json:"listen_address"`
-	LastUpdatedAt   string                 `json:"last_updated_at"`
-	Monitors        []*MonitorRuntimeState `json:"monitors"`
+	AppVersion        string                 `json:"app_version"`
+	StartedAt         string                 `json:"started_at"`
+	UptimeSeconds     int64                  `json:"uptime_seconds"`
+	OverallStatus     string                 `json:"overall_status"`
+	ControlAPIEnabled bool                   `json:"control_api_enabled"`
+	MonitorCount      int                    `json:"monitor_count"`
+	HealthyCount      int                    `json:"healthy_count"`
+	DegradedCount     int                    `json:"degraded_count"`
+	RecoveringCount   int                    `json:"recovering_count"`
+	FailedCount       int                    `json:"failed_count"`
+	DisabledCount     int                    `json:"disabled_count"`
+	ConfigFile        string                 `json:"config_file"`
+	StateFile         string                 `json:"state_file"`
+	EventsFile        string                 `json:"events_file"`
+	LogFile           string                 `json:"log_file"`
+	ListenAddress     string                 `json:"listen_address"`
+	LastUpdatedAt     string                 `json:"last_updated_at"`
+	Monitors          []*MonitorRuntimeState `json:"monitors"`
 }
 
 func CloneMonitorState(in *MonitorRuntimeState) *MonitorRuntimeState {

@@ -732,6 +732,8 @@ PROC_LOG_FILE=$log_file
 PROC_STATE_FILE=$state_file
 PROC_API_LISTEN_ADDR=$api_addr
 PROC_API_READ_HEADER_TIMEOUT=5s
+# Optional: enable admin control endpoints after setting a long random token.
+# PROC_API_ADMIN_TOKEN=
 EOF_ENV
   touch "$log_file"
   if [[ -f "$REPO_DIR/systemd/rpi-procmon.logrotate" ]]; then

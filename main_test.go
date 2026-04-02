@@ -885,10 +885,214 @@ func TestStatusAPIAllowsCrossOriginReads(t *testing.T) {
 	}
 }
 
+func TestTriggerCheckRunsManualCycle(t *testing.T) {
+	tmpDir := t.TempDir()
+	runner := &fakeRunner{
+		responses: map[string][]command.Outcome{
+			"check-service": {{
+				Output:   "healthy",
+				ExitCode: 0,
+			}},
+		},
+	}
+
+	cfg := config.Config{
+		ConfigFile: filepath.Join(tmpDir, "config.json"),
+		LogFile:    filepath.Join(tmpDir, "procmon.log"),
+		StateFile:  filepath.Join(tmpDir, "state.json"),
+		EventsFile: filepath.Join(tmpDir, "events.json"),
+		API:        config.APIConfig{ListenAddress: "127.0.0.1:9645"},
+		Monitors: []config.MonitorConfig{{
+			ID:               "svc",
+			Name:             "svc",
+			Type:             "command",
+			Interval:         "1m",
+			FailureThreshold: 1,
+			Cooldown:         "1m",
+			Checks: []config.CheckConfig{{
+				ID:      "check",
+				Type:    "command",
+				Command: "check-service",
+			}},
+			Recovery: []config.ActionConfig{{
+				Name:    "noop",
+				Type:    "command",
+				Command: "true",
+			}},
+		}},
+	}
+
+	logger, closeLog, err := logging.Open(cfg.LogFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeLog()
+
+	manager, err := engine.NewManager(cfg, logger, runner, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	monitor, err := manager.TriggerCheck(context.Background(), "svc")
+	if err != nil {
+		t.Fatalf("TriggerCheck failed: %v", err)
+	}
+	if monitor.Status != "healthy" {
+		t.Fatalf("expected healthy status, got %q", monitor.Status)
+	}
+	if monitor.CheckRunCount != 1 {
+		t.Fatalf("expected one manual check run, got %d", monitor.CheckRunCount)
+	}
+}
+
+func TestTriggerRecoveryRunsConfiguredRecovery(t *testing.T) {
+	tmpDir := t.TempDir()
+	runner := &fakeRunner{
+		responses: map[string][]command.Outcome{
+			"check-service": {
+				{Output: "healthy", ExitCode: 0},
+				{Output: "healthy", ExitCode: 0},
+			},
+			"restart-service": {{
+				Output:   "restarted",
+				ExitCode: 0,
+			}},
+		},
+	}
+
+	cfg := config.Config{
+		ConfigFile: filepath.Join(tmpDir, "config.json"),
+		LogFile:    filepath.Join(tmpDir, "procmon.log"),
+		StateFile:  filepath.Join(tmpDir, "state.json"),
+		EventsFile: filepath.Join(tmpDir, "events.json"),
+		API:        config.APIConfig{ListenAddress: "127.0.0.1:9645"},
+		Monitors: []config.MonitorConfig{{
+			ID:               "svc",
+			Name:             "svc",
+			Type:             "command",
+			Interval:         "1m",
+			FailureThreshold: 1,
+			Cooldown:         "1m",
+			Checks: []config.CheckConfig{{
+				ID:      "check",
+				Type:    "command",
+				Command: "check-service",
+			}},
+			Recovery: []config.ActionConfig{{
+				Name:    "restart",
+				Type:    "command",
+				Command: "restart-service",
+			}, {
+				Name: "recheck",
+				Type: "recheck",
+			}},
+		}},
+	}
+
+	logger, closeLog, err := logging.Open(cfg.LogFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeLog()
+
+	manager, err := engine.NewManager(cfg, logger, runner, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	monitor, err := manager.TriggerRecovery(context.Background(), "svc")
+	if err != nil {
+		t.Fatalf("TriggerRecovery failed: %v", err)
+	}
+	if monitor.Status != "healthy" {
+		t.Fatalf("expected healthy status after manual recovery, got %q", monitor.Status)
+	}
+	if monitor.RecoveryCount != 1 {
+		t.Fatalf("expected one recovery, got %d", monitor.RecoveryCount)
+	}
+}
+
+func TestControlAPIRequiresAdminToken(t *testing.T) {
+	cfg := config.Config{
+		API: config.APIConfig{
+			ListenAddress: "127.0.0.1:9645",
+		},
+	}
+	manager := &controlStubProvider{
+		stubProvider: stubProvider{
+			monitor: &state.MonitorRuntimeState{ID: "ma352", Status: "healthy"},
+		},
+	}
+
+	server := httptest.NewServer(api.NewServer(cfg, manager).Handler)
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/monitors/ma352/recover", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 when control api disabled, got %d", resp.StatusCode)
+	}
+}
+
+func TestControlAPITriggersRecoveryWhenAuthorized(t *testing.T) {
+	cfg := config.Config{
+		API: config.APIConfig{
+			ListenAddress: "127.0.0.1:9645",
+			AdminToken:    "secret-token",
+		},
+	}
+	manager := &controlStubProvider{
+		stubProvider: stubProvider{
+			monitor: &state.MonitorRuntimeState{ID: "ma352", Status: "healthy"},
+			snapshot: state.ProcmonStatus{
+				OverallStatus:     "healthy",
+				ControlAPIEnabled: true,
+			},
+		},
+	}
+
+	server := httptest.NewServer(api.NewServer(cfg, manager).Handler)
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/monitors/ma352/recover", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer secret-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from authorized control call, got %d", resp.StatusCode)
+	}
+	if manager.triggeredRecovery != "ma352" {
+		t.Fatalf("expected recovery trigger for ma352, got %q", manager.triggeredRecovery)
+	}
+}
+
 type stubProvider struct {
 	snapshot state.ProcmonStatus
 	monitor  *state.MonitorRuntimeState
 	events   []events.Event
+}
+
+type controlStubProvider struct {
+	stubProvider
+	triggeredCheck    string
+	triggeredRecovery string
 }
 
 func (s *stubProvider) Snapshot() state.ProcmonStatus {
@@ -928,4 +1132,20 @@ func (s *stubProvider) EventsSnapshot(filter events.Filter) []events.Event {
 		}
 	}
 	return result
+}
+
+func (s *controlStubProvider) TriggerCheck(_ context.Context, id string) (*state.MonitorRuntimeState, error) {
+	s.triggeredCheck = id
+	if s.monitor == nil || s.monitor.ID != id {
+		return nil, engine.ErrMonitorNotFound
+	}
+	return state.CloneMonitorState(s.monitor), nil
+}
+
+func (s *controlStubProvider) TriggerRecovery(_ context.Context, id string) (*state.MonitorRuntimeState, error) {
+	s.triggeredRecovery = id
+	if s.monitor == nil || s.monitor.ID != id {
+		return nil, engine.ErrMonitorNotFound
+	}
+	return state.CloneMonitorState(s.monitor), nil
 }

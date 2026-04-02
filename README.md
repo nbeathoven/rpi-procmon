@@ -15,6 +15,8 @@
   - `GET /monitors`
   - `GET /monitors/{id}`
   - `GET /events`
+  - `POST /api/v1/monitors/{id}/check`
+  - `POST /api/v1/monitors/{id}/recover`
 - Uses one canonical JSON config model for all monitors, including `ma352`.
 
 ## Main Files
@@ -177,6 +179,36 @@ sudo ./scripts/uninstall.sh --purge
 By default the API listens on `127.0.0.1:9645`.
 
 `GET /health` reports process liveness and overall procmon health. It returns HTTP `200` while the daemon is healthy or actively recovering and HTTP `503` when overall procmon status is degraded, failed, or unknown.
+
+`GET /status` and `GET /api/v1/status` return the full procmon snapshot, including `control_api_enabled` so app clients can detect whether manual control is available.
+
+Read endpoints are available in both unversioned and versioned forms:
+- `GET /health`
+- `GET /status`
+- `GET /events`
+- `GET /monitors`
+- `GET /monitors/{id}`
+- `GET /api/v1/health`
+- `GET /api/v1/status`
+- `GET /api/v1/events`
+- `GET /api/v1/monitors`
+- `GET /api/v1/monitors/{id}`
+
+Manual control endpoints are versioned and require an admin bearer token:
+- `POST /api/v1/monitors/{id}/check`
+- `POST /api/v1/monitors/{id}/recover`
+
+To enable manual control, set `PROC_API_ADMIN_TOKEN` in `/etc/default/rpi-procmon`. Without that token, the control API remains disabled.
+
+Example:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  http://127.0.0.1:9645/api/v1/monitors/ma352/recover
+```
+
+These control endpoints do not accept arbitrary shell commands. They only invoke the already-configured typed monitor checks and recovery sequence for the selected monitor id.
 
 Examples:
 

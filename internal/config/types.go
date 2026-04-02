@@ -13,6 +13,7 @@ type Config struct {
 type APIConfig struct {
 	ListenAddress     string `json:"listen_address"`
 	ReadHeaderTimeout string `json:"read_header_timeout"`
+	AdminToken        string `json:"admin_token,omitempty"`
 }
 
 type TargetConfig struct {

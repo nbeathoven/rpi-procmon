@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 - App revision updated to `eddc6bb`.
+- Added admin-token-gated procmon control endpoints for manual `check` and `recover` actions.
+- Added versioned `/api/v1/...` API aliases while preserving existing read endpoints.
+- Added per-monitor execution locking so scheduled and manual monitor actions do not overlap for the same service.
 - Add a target-aware monitor model with `local` and `ssh` transports so one procmon instance can monitor and recover remote systemd services such as `ma352-bridge`.
 - Add typed `systemd_service` checks and `restart_systemd_service` recovery actions instead of relying on raw shell snippets for service control.
 - Extend bootstrap so `MA352` and generic systemd service monitors can be configured for local or remote SSH-backed service control.

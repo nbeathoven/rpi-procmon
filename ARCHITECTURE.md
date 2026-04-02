@@ -75,8 +75,16 @@ The embedded HTTP API provides:
 - `/monitors`: list of all monitor states
 - `/monitors/{id}`: one monitor's full state
 - `/events`: reverse-chronological monitor history for app clients
+- `/api/v1/monitors/{id}/check`: admin-triggered on-demand check
+- `/api/v1/monitors/{id}/recover`: admin-triggered on-demand recovery
 
 Per-monitor API responses include the configured `target` object so external apps can distinguish local services from remotely managed ones.
+
+Manual control is intentionally narrow:
+- no arbitrary command execution endpoint
+- no service name or shell command passed in the request body
+- procmon only runs the monitor's existing typed checks and recovery steps
+- control endpoints are disabled unless `PROC_API_ADMIN_TOKEN` is configured
 
 ## Files
 
