@@ -217,6 +217,12 @@
       color: rgba(227, 234, 255, 0.7);
     }
 
+    .toolbar-help {
+      font-size: 0.84rem;
+      line-height: 1.45;
+      color: var(--muted);
+    }
+
     .toolbar-row {
       display: flex;
       gap: 10px;
@@ -699,8 +705,8 @@
           <h1>Procmon Control Surface</h1>
           <p class="subhead">
             Live health, recent faults, and recovery visibility for the services behind your Pi.
-            This preview reads directly from the running procmon API and keeps restart controls visible
-            but disabled until write endpoints exist.
+            This preview reads directly from the running procmon API and can trigger monitor checks and
+            recoveries when procmon is configured with an admin token.
           </p>
         </div>
         <div class="toolbar">
@@ -729,6 +735,17 @@
               <span class="live" id="connection-state">Live polling enabled</span>
               <span class="mono" id="last-sync">No refresh yet</span>
             </div>
+          </div>
+          <div class="toolbar-card">
+            <label for="admin-token">Admin token</label>
+            <div class="toolbar-row">
+              <input id="admin-token" type="password" placeholder="Bearer token for monitor controls">
+            </div>
+            <div class="toolbar-row">
+              <button id="save-token" class="secondary">Remember token</button>
+              <button id="clear-token" class="secondary">Forget token</button>
+            </div>
+            <div class="toolbar-help" id="control-state">Monitor controls unavailable until procmon admin token support is enabled.</div>
           </div>
         </div>
       </div>
@@ -771,15 +788,15 @@
         </div>
         <div class="detail-actions">
           <button class="secondary" id="open-monitor-json">Open JSON</button>
-          <button class="danger" disabled title="Requires future procmon control endpoints">Restart service</button>
-          <button class="danger" disabled title="Requires future procmon control endpoints">Restart procmon</button>
-          <button class="danger" disabled title="Requires future procmon control endpoints">Reboot host</button>
+          <button class="secondary" id="trigger-check">Check now</button>
+          <button class="danger" id="trigger-recover">Run recovery</button>
         </div>
       </div>
       <div id="detail-root"></div>
       <p class="footer-note">
         Read-side integration is live now through <span class="mono">/status</span>, <span class="mono">/monitors/{id}</span>, and <span class="mono">/events</span>.
-        Service restart and reboot actions are intentionally disabled until procmon exposes authenticated write endpoints.
+        Manual service control uses <span class="mono">POST /api/v1/monitors/{id}/check</span> and
+        <span class="mono">POST /api/v1/monitors/{id}/recover</span> with an admin bearer token.
       </p>
     </section>
   </main>
@@ -791,7 +808,9 @@
       events: [],
       selectedMonitorID: "",
       expandedEventMonitorID: "",
+      adminToken: "",
       refreshTimer: null,
+      actionInFlight: "",
     };
 
     const elements = {
@@ -799,6 +818,10 @@
       saveBase: document.getElementById("save-base"),
       refresh: document.getElementById("refresh"),
       refreshInterval: document.getElementById("refresh-interval"),
+      adminToken: document.getElementById("admin-token"),
+      saveToken: document.getElementById("save-token"),
+      clearToken: document.getElementById("clear-token"),
+      controlState: document.getElementById("control-state"),
       lastSync: document.getElementById("last-sync"),
       connectionState: document.getElementById("connection-state"),
       overallPill: document.getElementById("overall-pill"),
@@ -810,6 +833,8 @@
       monitorCountLabel: document.getElementById("monitor-count-label"),
       eventsCountLabel: document.getElementById("events-count-label"),
       openMonitorJSON: document.getElementById("open-monitor-json"),
+      triggerCheck: document.getElementById("trigger-check"),
+      triggerRecover: document.getElementById("trigger-recover"),
     };
 
     function normalizeBaseURL(value) {
@@ -904,6 +929,22 @@
       return response.json();
     }
 
+    async function postControlAction(monitorID, action) {
+      const response = await fetch(`${state.apiBase}/api/v1/monitors/${encodeURIComponent(monitorID)}/${action}`, {
+        method: "POST",
+        headers: {
+          "Accept": "application/json",
+          "Authorization": state.adminToken ? `Bearer ${state.adminToken}` : "",
+        },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message = payload && payload.error ? payload.error : `${response.status} ${response.statusText}`;
+        throw new Error(message);
+      }
+      return payload;
+    }
+
     function showError(message) {
       elements.errorBanner.textContent = message;
       elements.errorBanner.classList.add("visible");
@@ -914,6 +955,52 @@
       elements.errorBanner.textContent = "";
       elements.errorBanner.classList.remove("visible");
       elements.connectionState.textContent = state.refreshTimer ? "Live polling enabled" : "Manual refresh";
+    }
+
+    function controlsEnabled() {
+      return Boolean(state.snapshot && state.snapshot.control_api_enabled && state.adminToken);
+    }
+
+    function controlAvailabilityMessage() {
+      if (!state.snapshot) {
+        return "Load procmon status to inspect control availability.";
+      }
+      if (!state.snapshot.control_api_enabled) {
+        return "Monitor controls unavailable until procmon is configured with PROC_API_ADMIN_TOKEN or api.admin_token.";
+      }
+      if (!state.adminToken) {
+        return "Procmon control API is enabled. Enter the admin token in this browser to unlock Check now and Run recovery.";
+      }
+      return "Monitor controls are ready. Use Check now for an on-demand check or Run recovery to execute the configured recovery sequence.";
+    }
+
+    function syncControlUI() {
+      if (elements.controlState) {
+        elements.controlState.textContent = controlAvailabilityMessage();
+      }
+      const monitorSelected = Boolean(state.selectedMonitorID);
+      const busy = Boolean(state.actionInFlight);
+      const enabled = controlsEnabled();
+
+      elements.triggerCheck.disabled = !monitorSelected || !enabled || busy;
+      elements.triggerRecover.disabled = !monitorSelected || !enabled || busy;
+
+      if (!monitorSelected) {
+        elements.triggerCheck.title = "Select a monitor first";
+        elements.triggerRecover.title = "Select a monitor first";
+      } else if (!state.snapshot || !state.snapshot.control_api_enabled) {
+        elements.triggerCheck.title = "Procmon control API is disabled";
+        elements.triggerRecover.title = "Procmon control API is disabled";
+      } else if (!state.adminToken) {
+        elements.triggerCheck.title = "Enter the admin token to run controls";
+        elements.triggerRecover.title = "Enter the admin token to run controls";
+      } else if (busy) {
+        elements.triggerCheck.title = "Another action is in progress";
+        elements.triggerRecover.title = "Another action is in progress";
+      } else {
+        elements.triggerCheck.title = "Run an immediate monitor check";
+        elements.triggerRecover.title = "Run the configured recovery sequence";
+      }
     }
 
     function renderStats(snapshot) {
@@ -1011,7 +1098,8 @@
             <p class="monitor-summary">${escapeHTML(buildMonitorSummary(monitor))}</p>
             <div class="monitor-actions">
               <button class="secondary" data-monitor-open="${escapeHTML(monitor.id)}">Inspect</button>
-              <button class="danger" disabled title="Requires future procmon control endpoints">Restart</button>
+              <button class="secondary" data-monitor-action="check" data-monitor-id="${escapeHTML(monitor.id)}">Check now</button>
+              <button class="danger" data-monitor-action="recover" data-monitor-id="${escapeHTML(monitor.id)}">Run recovery</button>
             </div>
           </article>
         `;
@@ -1019,6 +1107,26 @@
 
       elements.monitorGrid.querySelectorAll("[data-monitor-open]").forEach((button) => {
         button.addEventListener("click", () => selectMonitor(button.getAttribute("data-monitor-open")));
+      });
+
+      elements.monitorGrid.querySelectorAll("[data-monitor-action]").forEach((button) => {
+        const monitorID = button.getAttribute("data-monitor-id") || "";
+        const action = button.getAttribute("data-monitor-action") || "";
+        const disabled = !controlsEnabled() || Boolean(state.actionInFlight);
+        button.disabled = disabled;
+        if (!controlsEnabled()) {
+          button.title = controlAvailabilityMessage();
+        } else if (state.actionInFlight) {
+          button.title = "Another action is in progress";
+        } else {
+          button.title = action === "check" ? "Run an immediate monitor check" : "Run the configured recovery sequence";
+        }
+        button.addEventListener("click", async () => {
+          if (!monitorID || !action || button.disabled) {
+            return;
+          }
+          await triggerMonitorAction(monitorID, action);
+        });
       });
     }
 
@@ -1114,6 +1222,7 @@
           </div>
         </div>
       `;
+      syncControlUI();
     }
 
     function groupEvents(events) {
@@ -1229,6 +1338,7 @@
     async function selectMonitor(id) {
       state.selectedMonitorID = id;
       renderMonitors(state.snapshot || { monitors: [] });
+      syncControlUI();
       try {
         const detail = await fetchJSON(`/monitors/${encodeURIComponent(id)}`);
         renderDetail(detail);
@@ -1238,6 +1348,31 @@
       } catch (error) {
         renderDetail(null);
         showError(`Failed to load monitor detail for ${id}: ${error.message}`);
+      }
+    }
+
+    async function triggerMonitorAction(monitorID, action) {
+      const labels = {
+        check: "Check now",
+        recover: "Run recovery",
+      };
+      const label = labels[action] || action;
+      state.actionInFlight = `${monitorID}:${action}`;
+      syncControlUI();
+      renderMonitors(state.snapshot || { monitors: [] });
+      try {
+        await postControlAction(monitorID, action);
+        clearError();
+        await refreshData();
+        if (state.selectedMonitorID !== monitorID) {
+          await selectMonitor(monitorID);
+        }
+      } catch (error) {
+        showError(`${label} failed for ${monitorID}: ${error.message}`);
+      } finally {
+        state.actionInFlight = "";
+        syncControlUI();
+        renderMonitors(state.snapshot || { monitors: [] });
       }
     }
 
@@ -1265,6 +1400,7 @@
         renderStats(snapshot);
         renderMonitors(snapshot);
         renderEvents(state.events);
+        syncControlUI();
 
         if (state.selectedMonitorID) {
           await selectMonitor(state.selectedMonitorID);
@@ -1292,9 +1428,12 @@
     function loadInitialSettings() {
       const params = new URLSearchParams(window.location.search);
       const stored = window.localStorage.getItem("procmon-ui-api-base") || "";
+      const storedToken = window.localStorage.getItem("procmon-ui-admin-token") || "";
       const initial = params.get("apiBase") || stored || window.location.origin;
       state.apiBase = normalizeBaseURL(initial);
+      state.adminToken = storedToken.trim();
       elements.apiBase.value = state.apiBase;
+      elements.adminToken.value = state.adminToken;
     }
 
     elements.saveBase.addEventListener("click", async () => {
@@ -1305,6 +1444,29 @@
 
     elements.refresh.addEventListener("click", refreshData);
     elements.refreshInterval.addEventListener("change", restartPolling);
+    elements.saveToken.addEventListener("click", () => {
+      state.adminToken = elements.adminToken.value.trim();
+      window.localStorage.setItem("procmon-ui-admin-token", state.adminToken);
+      syncControlUI();
+    });
+    elements.clearToken.addEventListener("click", () => {
+      state.adminToken = "";
+      elements.adminToken.value = "";
+      window.localStorage.removeItem("procmon-ui-admin-token");
+      syncControlUI();
+    });
+    elements.triggerCheck.addEventListener("click", async () => {
+      if (!state.selectedMonitorID || elements.triggerCheck.disabled) {
+        return;
+      }
+      await triggerMonitorAction(state.selectedMonitorID, "check");
+    });
+    elements.triggerRecover.addEventListener("click", async () => {
+      if (!state.selectedMonitorID || elements.triggerRecover.disabled) {
+        return;
+      }
+      await triggerMonitorAction(state.selectedMonitorID, "recover");
+    });
 
     loadInitialSettings();
     restartPolling();

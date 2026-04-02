@@ -227,7 +227,13 @@ The API also serves a browser preview for the proposed Homebridge-style dashboar
 open http://127.0.0.1:9645/ui/
 ```
 
-That page reads directly from the running procmon API and shows overall health, per-monitor cards, recent issues, and detailed monitor history. Restart and reboot controls are visible but intentionally disabled until authenticated write endpoints exist.
+That page reads directly from the running procmon API and shows overall health, per-monitor cards, recent issues grouped by monitored service, and detailed monitor history.
+
+When procmon is configured with `PROC_API_ADMIN_TOKEN`, the UI also supports:
+- `Check now` for `POST /api/v1/monitors/{id}/check`
+- `Run recovery` for `POST /api/v1/monitors/{id}/recover`
+
+The browser UI does not store the procmon admin token on the server. If you choose to remember it, the token is stored only in that browser's local storage.
 
 ## Monitor Model
 
