@@ -518,6 +518,24 @@
       word-break: break-word;
     }
 
+    .reason-banner {
+      padding: 14px 16px;
+      border-radius: 16px;
+      border: 1px solid rgba(255, 171, 82, 0.18);
+      background: rgba(255, 171, 82, 0.08);
+      display: grid;
+      gap: 8px;
+    }
+
+    .reason-banner.fail {
+      border-color: rgba(255, 122, 143, 0.24);
+      background: rgba(255, 122, 143, 0.08);
+    }
+
+    .reason-title {
+      font-weight: 700;
+    }
+
     .timeline {
       grid-template-columns: 1fr;
       gap: 18px;
@@ -1042,6 +1060,10 @@
       if (monitor.last_error) {
         return monitor.last_error;
       }
+      const latestEvent = findLatestMonitorEvent(monitor.id);
+      if (latestEvent && latestEvent.reason) {
+        return `Last incident: ${latestEvent.reason}`;
+      }
       if (monitor.status === "healthy") {
         return "All configured checks are currently passing.";
       }
@@ -1052,6 +1074,92 @@
         return "This monitor is configured but disabled.";
       }
       return "No detailed reason reported yet.";
+    }
+
+    function eventTypeLabel(event) {
+      return String(event && event.event_type ? event.event_type : "event").replaceAll("_", " ");
+    }
+
+    function latestCheckFailureMessage(results) {
+      const failed = Array.isArray(results) ? results.find((result) => result && result.success === false) : null;
+      return failed ? failed.message || failed.name || failed.type || "" : "";
+    }
+
+    function latestRecoveryFailureMessage(results) {
+      const failed = Array.isArray(results) ? results.find((result) => result && result.success === false) : null;
+      if (!failed) {
+        return "";
+      }
+      return failed.message || failed.output || failed.name || failed.type || "";
+    }
+
+    function eventReason(event) {
+      if (!event) {
+        return "";
+      }
+      if (event.reason) {
+        return event.reason;
+      }
+      const checkFailure = latestCheckFailureMessage(event.check_results);
+      if (checkFailure) {
+        return checkFailure;
+      }
+      const recoveryFailure = latestRecoveryFailureMessage(event.recovery_results);
+      if (recoveryFailure) {
+        return recoveryFailure;
+      }
+      return "";
+    }
+
+    function monitorEvents(monitorID) {
+      return (Array.isArray(state.events) ? state.events : [])
+        .filter((event) => event && event.monitor_id === monitorID)
+        .sort((a, b) => String(b.timestamp || "").localeCompare(String(a.timestamp || "")));
+    }
+
+    function findLatestMonitorEvent(monitorID) {
+      return monitorEvents(monitorID)[0] || null;
+    }
+
+    function buildFailureNarrative(monitor) {
+      const reasons = Array.isArray(monitor.last_failure_reasons) ? monitor.last_failure_reasons.filter(Boolean) : [];
+      if (reasons.length) {
+        return {
+          title: monitor.status === "healthy" ? "Last recorded failure" : "Current failure signal",
+          body: reasons[0],
+          stale: monitor.status === "healthy",
+        };
+      }
+      if (monitor.last_error) {
+        return {
+          title: monitor.status === "healthy" ? "Last recorded issue" : "Current failure signal",
+          body: monitor.last_error,
+          stale: monitor.status === "healthy",
+        };
+      }
+      const latestEvent = findLatestMonitorEvent(monitor.id);
+      const reason = eventReason(latestEvent);
+      if (reason) {
+        return {
+          title: latestEvent && (latestEvent.status_after === "healthy" || latestEvent.event_type === "check_succeeded")
+            ? "Last resolved incident"
+            : "Most recent incident",
+          body: reason,
+          stale: latestEvent ? ["healthy"].includes(latestEvent.status_after) : false,
+        };
+      }
+      if (monitor.status === "healthy") {
+        return {
+          title: "Current state",
+          body: "All configured checks are currently passing and no recent failure reason is recorded.",
+          stale: false,
+        };
+      }
+      return {
+        title: "Current state",
+        body: "No explicit failure reason is recorded yet. Inspect the last check results below for the failing signal.",
+        stale: false,
+      };
     }
 
     function formatTargetLabel(monitor) {
@@ -1139,6 +1247,8 @@
       const checks = Array.isArray(monitor.last_check_results) ? monitor.last_check_results : [];
       const recoveries = Array.isArray(monitor.last_recovery_results) ? monitor.last_recovery_results : [];
       const reasons = Array.isArray(monitor.last_failure_reasons) ? monitor.last_failure_reasons : [];
+      const recentEvents = monitorEvents(monitor.id).slice(0, 6);
+      const narrative = buildFailureNarrative(monitor);
 
       elements.detailRoot.innerHTML = `
         <div class="detail-card">
@@ -1179,9 +1289,25 @@
               <span class="detail-label">Recovery count</span>
               <span class="detail-value">${escapeHTML(monitor.recovery_count ?? 0)}</span>
             </div>
+            <div class="detail-block">
+              <span class="detail-label">Last recovery success</span>
+              <span class="detail-value">${escapeHTML(fmtTimestamp(monitor.last_recovery_success_at))}</span>
+            </div>
+            <div class="detail-block">
+              <span class="detail-label">Last recovery failure</span>
+              <span class="detail-value">${escapeHTML(fmtTimestamp(monitor.last_recovery_failure_at))}</span>
+            </div>
           </div>
 
           <div class="stack">
+            <div class="detail-block">
+              <span class="detail-label">Failure reason</span>
+              <div class="reason-banner ${monitor.status === "healthy" ? "" : "fail"}">
+                <div class="reason-title">${escapeHTML(narrative.title)}</div>
+                <div class="result-message">${escapeHTML(narrative.body)}</div>
+              </div>
+            </div>
+
             <div class="detail-block">
               <span class="detail-label">Last failure reasons</span>
               ${reasons.length
@@ -1218,6 +1344,24 @@
                   </div>
                 `).join("")
                 : `<div class="result-row"><div class="result-message">No recovery action history available.</div></div>`}
+            </div>
+
+            <div class="detail-block">
+              <span class="detail-label">Recent monitor events</span>
+              ${recentEvents.length
+                ? recentEvents.map((event) => `
+                  <div class="result-row ${["check_failed", "recovery_failed"].includes(event.event_type) ? "fail" : ""}">
+                    <div class="result-top">
+                      <span class="result-name">${escapeHTML(eventTypeLabel(event))}</span>
+                      <span class="mono">${escapeHTML(fmtTimestamp(event.timestamp))}</span>
+                    </div>
+                    <div class="result-message">${escapeHTML(eventReason(event) || "No explicit reason attached to this event.")}</div>
+                    ${event.recovery_results && event.recovery_results.length
+                      ? `<div class="mono">${escapeHTML(event.recovery_results.map((result) => `${result.name || result.type}: ${result.success ? "ok" : (result.message || "failed")}`).join("\n"))}</div>`
+                      : ""}
+                  </div>
+                `).join("")
+                : `<div class="result-row"><div class="result-message">No recent event history available for this monitor.</div></div>`}
             </div>
           </div>
         </div>
