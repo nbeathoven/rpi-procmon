@@ -194,6 +194,9 @@ Read endpoints are available in both unversioned and versioned forms:
 - `GET /api/v1/monitors`
 - `GET /api/v1/monitors/{id}`
 
+Browser clients use CORS according to `api.cors_origin` in config or `PROC_API_CORS_ORIGIN`
+in the environment. If unset, procmon defaults to `http://127.0.0.1:9645`.
+
 Manual control endpoints are versioned and require an admin bearer token:
 - `POST /api/v1/monitors/{id}/check`
 - `POST /api/v1/monitors/{id}/recover`

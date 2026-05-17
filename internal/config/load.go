@@ -164,6 +164,9 @@ func applyEnvOverrides(cfg *Config) {
 	if value := strings.TrimSpace(os.Getenv("PROC_API_READ_HEADER_TIMEOUT")); value != "" {
 		cfg.API.ReadHeaderTimeout = value
 	}
+	if value := strings.TrimSpace(os.Getenv("PROC_API_CORS_ORIGIN")); value != "" {
+		cfg.API.CORSOrigin = value
+	}
 	if value := strings.TrimSpace(os.Getenv("PROC_API_ADMIN_TOKEN")); value != "" {
 		cfg.API.AdminToken = value
 	}

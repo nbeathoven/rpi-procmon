@@ -19,6 +19,16 @@ import (
 //go:embed ui/index.html
 var uiFS embed.FS
 
+var uiBytes []byte
+
+func init() {
+	b, err := uiFS.ReadFile("ui/index.html")
+	if err != nil {
+		panic("rpi-procmon: embedded ui/index.html missing: " + err.Error())
+	}
+	uiBytes = b
+}
+
 type SnapshotProvider interface {
 	Snapshot() state.ProcmonStatus
 	MonitorSnapshot(id string) (*state.MonitorRuntimeState, bool)
@@ -45,48 +55,48 @@ func NewServer(cfg config.Config, provider SnapshotProvider) *http.Server {
 	mux.HandleFunc("/ui/", serveUI)
 	mux.HandleFunc("/ui/index.html", serveUI)
 
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		serveHealth(w, provider)
-	})
-	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, provider.Snapshot())
-	})
-	mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
-		serveEvents(w, r, provider)
-	})
-	mux.HandleFunc("/monitors", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, provider.Snapshot().Monitors)
-	})
-	mux.HandleFunc("/monitors/", func(w http.ResponseWriter, r *http.Request) {
-		serveMonitorRoute(w, r, provider, controlProvider, auth, strings.TrimPrefix(r.URL.Path, "/monitors/"))
-	})
+	register := func(pattern string, h http.HandlerFunc) {
+		mux.HandleFunc(pattern, h)
+		mux.HandleFunc("/api/v1"+pattern, h)
+	}
 
-	mux.HandleFunc("/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
+	register("/health", func(w http.ResponseWriter, r *http.Request) {
 		serveHealth(w, provider)
 	})
-	mux.HandleFunc("/api/v1/status", func(w http.ResponseWriter, r *http.Request) {
+	register("/status", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, provider.Snapshot())
 	})
-	mux.HandleFunc("/api/v1/events", func(w http.ResponseWriter, r *http.Request) {
+	register("/events", func(w http.ResponseWriter, r *http.Request) {
 		serveEvents(w, r, provider)
 	})
-	mux.HandleFunc("/api/v1/monitors", func(w http.ResponseWriter, r *http.Request) {
+	register("/monitors", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, provider.Snapshot().Monitors)
 	})
-	mux.HandleFunc("/api/v1/monitors/", func(w http.ResponseWriter, r *http.Request) {
-		serveMonitorRoute(w, r, provider, controlProvider, auth, strings.TrimPrefix(r.URL.Path, "/api/v1/monitors/"))
+	register("/monitors/", func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/monitors/")
+		if strings.HasPrefix(r.URL.Path, "/api/v1/") {
+			path = strings.TrimPrefix(r.URL.Path, "/api/v1/monitors/")
+		}
+		serveMonitorRoute(w, r, provider, controlProvider, auth, path)
 	})
 
 	return &http.Server{
 		Addr:              cfg.API.ListenAddress,
-		Handler:           withCORS(mux),
+		Handler:           withCORS(mux, cfg.API.CORSOrigin),
 		ReadHeaderTimeout: parseDuration(cfg.API.ReadHeaderTimeout, 5*time.Second),
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      6 * time.Minute,
+		IdleTimeout:       90 * time.Second,
 	}
 }
 
-func withCORS(next http.Handler) http.Handler {
+func withCORS(next http.Handler, allowedOrigin string) http.Handler {
+	origin := allowedOrigin
+	if origin == "" {
+		origin = "http://127.0.0.1:9645"
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type")
 		if r.Method == http.MethodOptions {
@@ -102,13 +112,8 @@ func serveUI(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	data, err := uiFS.ReadFile("ui/index.html")
-	if err != nil {
-		http.Error(w, "ui unavailable", http.StatusInternalServerError)
-		return
-	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(data)
+	_, _ = w.Write(uiBytes)
 }
 
 func serveHealth(w http.ResponseWriter, provider SnapshotProvider) {

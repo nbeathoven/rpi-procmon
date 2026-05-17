@@ -877,33 +877,6 @@
       }).format(date);
     }
 
-    function fmtDayLabel(value) {
-      if (!value) {
-        return "Unknown day";
-      }
-      const date = new Date(value);
-      if (Number.isNaN(date.getTime())) {
-        return value;
-      }
-
-      const eventDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-      const now = new Date();
-      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const deltaDays = Math.round((today - eventDay) / 86400000);
-      if (deltaDays === 0) {
-        return "Today";
-      }
-      if (deltaDays === 1) {
-        return "Yesterday";
-      }
-
-      return new Intl.DateTimeFormat(undefined, {
-        weekday: "long",
-        month: "short",
-        day: "numeric",
-      }).format(date);
-    }
-
     function fmtDurationMS(ms) {
       if (!ms && ms !== 0) {
         return "n/a";
@@ -1213,12 +1186,7 @@
         `;
       }).join("");
 
-      elements.monitorGrid.querySelectorAll("[data-monitor-open]").forEach((button) => {
-        button.addEventListener("click", () => selectMonitor(button.getAttribute("data-monitor-open")));
-      });
-
       elements.monitorGrid.querySelectorAll("[data-monitor-action]").forEach((button) => {
-        const monitorID = button.getAttribute("data-monitor-id") || "";
         const action = button.getAttribute("data-monitor-action") || "";
         const disabled = !controlsEnabled() || Boolean(state.actionInFlight);
         button.disabled = disabled;
@@ -1229,12 +1197,6 @@
         } else {
           button.title = action === "check" ? "Run an immediate monitor check" : "Run the configured recovery sequence";
         }
-        button.addEventListener("click", async () => {
-          if (!monitorID || !action || button.disabled) {
-            return;
-          }
-          await triggerMonitorAction(monitorID, action);
-        });
       });
     }
 
@@ -1507,10 +1469,8 @@
       try {
         await postControlAction(monitorID, action);
         clearError();
+        state.selectedMonitorID = monitorID;
         await refreshData();
-        if (state.selectedMonitorID !== monitorID) {
-          await selectMonitor(monitorID);
-        }
       } catch (error) {
         showError(`${label} failed for ${monitorID}: ${error.message}`);
       } finally {
@@ -1520,39 +1480,56 @@
       }
     }
 
+    let refreshInFlight = false;
+
     async function refreshData() {
+      if (refreshInFlight) return;
+      refreshInFlight = true;
       try {
-        const [snapshot, eventPayload] = await Promise.all([
-          fetchJSON("/status"),
-          fetchJSON("/events?limit=60"),
-        ]);
-        state.snapshot = snapshot;
-        state.events = Array.isArray(eventPayload.events) ? eventPayload.events : [];
-        clearError();
+        try {
+          const [snapshot, eventPayload] = await Promise.all([
+            fetchJSON("/status"),
+            fetchJSON("/events?limit=60"),
+          ]);
+          state.snapshot = snapshot;
+          state.events = Array.isArray(eventPayload.events) ? eventPayload.events : [];
+          clearError();
 
-        const overall = snapshot.overall_status || "unknown";
-        elements.overallPill.className = `status-pill ${statusClass(overall)}`;
-        elements.overallPill.textContent = overall;
-        elements.lastSync.textContent = `Last sync ${fmtTimestamp(new Date().toISOString())}`;
+          const overall = snapshot.overall_status || "unknown";
+          elements.overallPill.className = `status-pill ${statusClass(overall)}`;
+          elements.overallPill.textContent = overall;
+          elements.lastSync.textContent = `Last sync ${fmtTimestamp(new Date().toISOString())}`;
 
-        if (!state.selectedMonitorID) {
-          const monitors = Array.isArray(snapshot.monitors) ? snapshot.monitors : [];
-          const attention = monitors.find((monitor) => ["failed", "degraded", "recovering"].includes(monitor.status));
-          state.selectedMonitorID = (attention || monitors[0] || {}).id || "";
+          if (!state.selectedMonitorID) {
+            const monitors = Array.isArray(snapshot.monitors) ? snapshot.monitors : [];
+            const attention = monitors.find((monitor) => ["failed", "degraded", "recovering"].includes(monitor.status));
+            state.selectedMonitorID = (attention || monitors[0] || {}).id || "";
+          }
+
+          renderStats(snapshot);
+          renderMonitors(snapshot);
+          renderEvents(state.events);
+          syncControlUI();
+
+          if (state.selectedMonitorID) {
+            const monitors = Array.isArray(snapshot.monitors) ? snapshot.monitors : [];
+            const monitor = monitors.find((m) => m && m.id === state.selectedMonitorID) || null;
+            renderDetail(monitor);
+            elements.openMonitorJSON.onclick = () => {
+              window.open(
+                `${state.apiBase}/monitors/${encodeURIComponent(state.selectedMonitorID)}`,
+                "_blank",
+                "noopener"
+              );
+            };
+          } else {
+            renderDetail(null);
+          }
+        } catch (error) {
+          showError(`Failed to refresh procmon data from ${state.apiBase}: ${error.message}`);
         }
-
-        renderStats(snapshot);
-        renderMonitors(snapshot);
-        renderEvents(state.events);
-        syncControlUI();
-
-        if (state.selectedMonitorID) {
-          await selectMonitor(state.selectedMonitorID);
-        } else {
-          renderDetail(null);
-        }
-      } catch (error) {
-        showError(`Failed to refresh procmon data from ${state.apiBase}: ${error.message}`);
+      } finally {
+        refreshInFlight = false;
       }
     }
 
@@ -1613,6 +1590,21 @@
     });
 
     loadInitialSettings();
+    elements.monitorGrid.addEventListener("click", async (e) => {
+      const openBtn = e.target.closest("[data-monitor-open]");
+      if (openBtn && !openBtn.disabled) {
+        selectMonitor(openBtn.getAttribute("data-monitor-open"));
+        return;
+      }
+      const actionBtn = e.target.closest("[data-monitor-action]");
+      if (actionBtn && !actionBtn.disabled) {
+        const monitorID = actionBtn.getAttribute("data-monitor-id") || "";
+        const action = actionBtn.getAttribute("data-monitor-action") || "";
+        if (monitorID && action) {
+          await triggerMonitorAction(monitorID, action);
+        }
+      }
+    });
     restartPolling();
     refreshData();
   </script>
