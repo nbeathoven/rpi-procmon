@@ -712,6 +712,239 @@
         max-width: none;
       }
     }
+    .narrative {
+      padding: 13px 16px;
+      border-radius: 14px;
+      margin-bottom: 14px;
+      display: grid;
+      gap: 6px;
+    }
+    .narrative-fail {
+      border: 1px solid rgba(255, 100, 120, 0.30);
+      background: rgba(255, 80, 100, 0.08);
+    }
+    .narrative-warn {
+      border: 1px solid rgba(255, 200, 60, 0.30);
+      background: rgba(255, 180, 50, 0.08);
+    }
+    .narrative-ok {
+      border: 1px solid rgba(80, 210, 150, 0.25);
+      background: rgba(80, 210, 150, 0.07);
+    }
+    .narrative-label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-weight: 700;
+    }
+    .narrative-fail .narrative-label { color: #ff9aaa; }
+    .narrative-warn .narrative-label { color: #ffd580; }
+    .narrative-ok  .narrative-label { color: #7de8b5; }
+    .narrative-body {
+      font-family: var(--mono);
+      font-size: 0.83rem;
+      color: var(--text);
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .stat-chip {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 12px;
+      display: grid;
+      gap: 5px;
+    }
+    .stat-chip-label {
+      font-size: 0.70rem;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--muted);
+    }
+    .stat-chip-value {
+      font-size: 0.90rem;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.2;
+    }
+    .stat-chip-value.stat-ok  { color: var(--healthy); }
+    .stat-chip-value.stat-bad { color: var(--failed); }
+    .stat-chip-value.stat-warn { color: var(--recovering); }
+
+    .checks-strip {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      margin-bottom: 14px;
+    }
+    .check-row {
+      display: grid;
+      grid-template-columns: 18px 1fr 56px;
+      gap: 10px;
+      align-items: start;
+      padding: 9px 13px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.05);
+      font-size: 0.82rem;
+    }
+    .check-row:last-child { border-bottom: none; }
+    .check-row.check-fail { background: rgba(255, 122, 143, 0.07); }
+    .check-icon {
+      font-size: 13px;
+      line-height: 1;
+      padding-top: 2px;
+      font-style: normal;
+    }
+    .check-icon.check-pass { color: var(--healthy); }
+    .check-icon.check-fail { color: var(--failed); }
+    .check-name {
+      font-weight: 700;
+      font-family: var(--mono);
+      font-size: 0.80rem;
+      line-height: 1.3;
+    }
+    .check-msg {
+      font-family: var(--mono);
+      font-size: 0.77rem;
+      color: var(--muted);
+      line-height: 1.45;
+      margin-top: 2px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .check-dur {
+      font-family: var(--mono);
+      font-size: 0.76rem;
+      color: var(--muted);
+      text-align: right;
+      padding-top: 2px;
+      white-space: nowrap;
+    }
+
+    .detail-two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .mini-panel {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 13px;
+      display: grid;
+      gap: 0;
+    }
+    .mini-panel-label {
+      font-size: 0.70rem;
+      text-transform: uppercase;
+      letter-spacing: 0.09em;
+      color: var(--muted);
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .mini-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+      font-size: 0.80rem;
+    }
+    .mini-row:last-child { border-bottom: none; }
+    .mini-row-name {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      color: var(--text);
+      line-height: 1.35;
+      word-break: break-all;
+    }
+    .mini-row-right {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .mini-status {
+      font-size: 0.73rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .mini-status.s-ok   { color: var(--healthy); }
+    .mini-status.s-fail { color: var(--failed); }
+    .mini-status.s-warn { color: var(--recovering); }
+    .mini-status.s-muted { color: var(--muted); }
+    .mini-time {
+      font-family: var(--mono);
+      font-size: 0.73rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .section-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .section-row-label {
+      font-size: 0.70rem;
+      text-transform: uppercase;
+      letter-spacing: 0.09em;
+      color: var(--muted);
+      font-weight: 700;
+    }
+    .section-badge {
+      padding: 2px 9px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      font-size: 0.70rem;
+      font-weight: 700;
+      color: var(--muted);
+    }
+    .section-badge.badge-fail {
+      background: rgba(255, 100, 120, 0.16);
+      color: #ff9aaa;
+    }
+
+    .meta-footer {
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+      align-items: center;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+      margin-top: 2px;
+    }
+    .meta-pair {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      font-size: 0.78rem;
+    }
+    .meta-pair-key  { color: var(--muted); }
+    .meta-pair-val  { font-family: var(--mono); color: var(--text); }
+
+    .detail-empty {
+      padding: 10px 0;
+      font-size: 0.82rem;
+      color: var(--muted);
+      font-family: var(--mono);
+    }
+
+    @media (max-width: 720px) {
+      .stats-row        { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .detail-two-col   { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -1200,134 +1433,195 @@
       });
     }
 
+    function narrativeClass(status) {
+      switch (String(status || "").toLowerCase()) {
+        case "healthy":    return "narrative-ok";
+        case "recovering": return "narrative-warn";
+        default:           return "narrative-fail";
+      }
+    }
+
     function renderDetail(monitor) {
       if (!monitor) {
         elements.detailRoot.innerHTML = `<div class="empty-state">Select a monitor to inspect its checks, history, and recovery details.</div>`;
         return;
       }
 
-      const checks = Array.isArray(monitor.last_check_results) ? monitor.last_check_results : [];
-      const recoveries = Array.isArray(monitor.last_recovery_results) ? monitor.last_recovery_results : [];
-      const reasons = Array.isArray(monitor.last_failure_reasons) ? monitor.last_failure_reasons : [];
-      const recentEvents = monitorEvents(monitor.id).slice(0, 6);
-      const narrative = buildFailureNarrative(monitor);
+      const checks     = Array.isArray(monitor.last_check_results)    ? monitor.last_check_results    : [];
+      const recoveries = Array.isArray(monitor.last_recovery_results)  ? monitor.last_recovery_results  : [];
+      const recentEvts = monitorEvents(monitor.id).slice(0, 5);
+      const narrative  = buildFailureNarrative(monitor);
+
+      const failCount = checks.filter((c) => c && c.success === false).length;
+      const checksLabel = checks.length === 0
+        ? "no results yet"
+        : failCount > 0
+          ? `${checks.length} check${checks.length !== 1 ? "s" : ""} · ${failCount} failing`
+          : `${checks.length} check${checks.length !== 1 ? "s" : ""} · all passing`;
+
+      const lastSuccessValue = fmtTimestamp(monitor.last_success_at);
+      const lastFailureValue = fmtTimestamp(monitor.last_failure_at);
+      const nextCheckValue   = fmtTimestamp(monitor.next_check_at);
+      const recoveryValue    = `${monitor.recovery_count ?? 0} total`;
+
+      const lastSuccessCls = monitor.status === "healthy" ? "stat-ok" : "";
+      const lastFailureCls = monitor.last_failure_at && monitor.status !== "healthy" ? "stat-bad" : "";
+      const recoveryCls    = (monitor.recovery_count ?? 0) > 0 ? "stat-warn" : "";
+
+      function recoveryStatusCls(result) {
+        if (!result) return "s-muted";
+        return result.success === true ? "s-ok" : result.success === false ? "s-fail" : "s-warn";
+      }
+      function recoveryStatusLabel(result) {
+        if (!result) return "";
+        return result.success === true ? "ok" : result.success === false ? "failed" : "running…";
+      }
+
+      function eventStatusCls(event) {
+        const t = (event && event.event_type) || "";
+        if (t === "check_succeeded" || t === "recovery_succeeded") return "s-ok";
+        if (t === "check_failed"    || t === "recovery_failed")    return "s-fail";
+        return "s-warn";
+      }
+      function eventStatusLabel(event) {
+        const t = (event && event.event_type) || "";
+        if (t === "check_succeeded" || t === "recovery_succeeded") return "ok";
+        if (t === "check_failed"    || t === "recovery_failed")    return "failed";
+        return "event";
+      }
 
       elements.detailRoot.innerHTML = `
         <div class="detail-card">
-          <div class="monitor-head">
+
+          <div class="monitor-head" style="margin-bottom:14px;">
             <div>
-              <div class="detail-label">Monitor</div>
               <h3 class="monitor-name">${escapeHTML(monitor.name || monitor.id)}</h3>
             </div>
-            <div class="status-pill ${statusClass(monitor.status)}">${escapeHTML(monitor.status || "unknown")}</div>
-          </div>
-
-          <div class="detail-grid">
-            <div class="detail-block">
-              <span class="detail-label">Monitor ID</span>
-              <span class="detail-value mono">${escapeHTML(monitor.id)}</span>
-            </div>
-            <div class="detail-block">
-              <span class="detail-label">Type</span>
-              <span class="detail-value">${escapeHTML(monitor.type || "unknown")}</span>
-            </div>
-            <div class="detail-block">
-              <span class="detail-label">Target</span>
-              <span class="detail-value">${escapeHTML(formatTargetLabel(monitor))}</span>
-            </div>
-            <div class="detail-block">
-              <span class="detail-label">Last success</span>
-              <span class="detail-value">${escapeHTML(fmtTimestamp(monitor.last_success_at))}</span>
-            </div>
-            <div class="detail-block">
-              <span class="detail-label">Last failure</span>
-              <span class="detail-value">${escapeHTML(fmtTimestamp(monitor.last_failure_at))}</span>
-            </div>
-            <div class="detail-block">
-              <span class="detail-label">Next check</span>
-              <span class="detail-value">${escapeHTML(fmtTimestamp(monitor.next_check_at))}</span>
-            </div>
-            <div class="detail-block">
-              <span class="detail-label">Recovery count</span>
-              <span class="detail-value">${escapeHTML(monitor.recovery_count ?? 0)}</span>
-            </div>
-            <div class="detail-block">
-              <span class="detail-label">Last recovery success</span>
-              <span class="detail-value">${escapeHTML(fmtTimestamp(monitor.last_recovery_success_at))}</span>
-            </div>
-            <div class="detail-block">
-              <span class="detail-label">Last recovery failure</span>
-              <span class="detail-value">${escapeHTML(fmtTimestamp(monitor.last_recovery_failure_at))}</span>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <span class="meta-chip">${escapeHTML(monitor.type || "monitor")}</span>
+              <div class="status-pill ${statusClass(monitor.status)}">${escapeHTML(monitor.status || "unknown")}</div>
             </div>
           </div>
 
-          <div class="stack">
-            <div class="detail-block">
-              <span class="detail-label">Failure reason</span>
-              <div class="reason-banner ${monitor.status === "healthy" ? "" : "fail"}">
-                <div class="reason-title">${escapeHTML(narrative.title)}</div>
-                <div class="result-message">${escapeHTML(narrative.body)}</div>
-              </div>
-            </div>
+          <div class="narrative ${narrativeClass(monitor.status)}">
+            <span class="narrative-label">${escapeHTML(narrative.title)}</span>
+            <span class="narrative-body">${escapeHTML(narrative.body)}</span>
+          </div>
 
-            <div class="detail-block">
-              <span class="detail-label">Last failure reasons</span>
-              ${reasons.length
-                ? reasons.map((reason) => `<div class="result-row fail"><div class="result-message">${escapeHTML(reason)}</div></div>`).join("")
-                : `<div class="result-row"><div class="result-message">No failure reasons recorded.</div></div>`}
+          <div class="stats-row">
+            <div class="stat-chip">
+              <span class="stat-chip-label">Last success</span>
+              <span class="stat-chip-value ${escapeHTML(lastSuccessCls)}">${escapeHTML(lastSuccessValue)}</span>
             </div>
+            <div class="stat-chip">
+              <span class="stat-chip-label">Last failure</span>
+              <span class="stat-chip-value ${escapeHTML(lastFailureCls)}">${escapeHTML(lastFailureValue)}</span>
+            </div>
+            <div class="stat-chip">
+              <span class="stat-chip-label">Next check</span>
+              <span class="stat-chip-value">${escapeHTML(nextCheckValue)}</span>
+            </div>
+            <div class="stat-chip">
+              <span class="stat-chip-label">Recoveries</span>
+              <span class="stat-chip-value ${escapeHTML(recoveryCls)}">${escapeHTML(recoveryValue)}</span>
+            </div>
+          </div>
 
-            <div class="detail-block">
-              <span class="detail-label">Last check results</span>
-              ${checks.length
-                ? checks.map((result) => `
-                  <div class="result-row ${result.success ? "" : "fail"}">
-                    <div class="result-top">
-                      <span class="result-name">${escapeHTML(result.name || result.id || result.type)}</span>
-                      <span class="mono">${escapeHTML(fmtDurationMS(result.duration_ms))}</span>
-                    </div>
-                    <div class="result-message">${escapeHTML(result.message || "No message")}</div>
+          <div class="section-row">
+            <span class="section-row-label">Checks</span>
+            <span class="section-badge${failCount > 0 ? " badge-fail" : ""}">${escapeHTML(checksLabel)}</span>
+          </div>
+
+          <div class="checks-strip">
+            ${checks.length
+              ? checks.map((result) => `
+                <div class="check-row${result.success === false ? " check-fail" : ""}">
+                  <span class="check-icon ${result.success === false ? "check-fail" : "check-pass"}">
+                    ${result.success === false ? "✗" : "✓"}
+                  </span>
+                  <div>
+                    <div class="check-name">${escapeHTML(result.name || result.id || result.type || "check")}</div>
+                    ${result.message ? `<div class="check-msg">${escapeHTML(result.message)}</div>` : ""}
                   </div>
-                `).join("")
-                : `<div class="result-row"><div class="result-message">No check result history available.</div></div>`}
-            </div>
+                  <span class="check-dur">${escapeHTML(fmtDurationMS(result.duration_ms))}</span>
+                </div>
+              `).join("")
+              : `<div class="check-row"><span class="check-icon check-pass" style="opacity:0.4">—</span><div class="check-msg">No check results recorded yet.</div><span class="check-dur"></span></div>`
+            }
+          </div>
 
-            <div class="detail-block">
-              <span class="detail-label">Last recovery results</span>
+          <div class="detail-two-col">
+
+            <div class="mini-panel">
+              <div class="mini-panel-label">Last recovery</div>
               ${recoveries.length
                 ? recoveries.map((result) => `
-                  <div class="result-row ${result.success ? "" : "fail"}">
-                    <div class="result-top">
-                      <span class="result-name">${escapeHTML(result.name || result.type)}</span>
-                      <span class="mono">${escapeHTML(fmtDurationMS(result.duration_ms))}</span>
+                  <div class="mini-row">
+                    <span class="mini-row-name">${escapeHTML(result.name || result.type || "step")}</span>
+                    <div class="mini-row-right">
+                      <span class="mini-status ${recoveryStatusCls(result)}">${recoveryStatusLabel(result)}</span>
                     </div>
-                    <div class="result-message">${escapeHTML(result.message || "No message")}</div>
-                    ${result.output ? `<div class="mono">${escapeHTML(result.output)}</div>` : ""}
                   </div>
                 `).join("")
-                : `<div class="result-row"><div class="result-message">No recovery action history available.</div></div>`}
+                : `<div class="detail-empty">No recovery run yet.</div>`
+              }
+              ${monitor.last_recovery_success_at || monitor.last_recovery_failure_at ? `
+                <div style="padding-top:8px;border-top:1px solid rgba(255,255,255,0.07);margin-top:4px;">
+                  ${monitor.last_recovery_success_at
+                    ? `<div class="mini-row"><span class="mini-row-name" style="color:var(--muted)">Last succeeded</span><span class="mini-time">${escapeHTML(fmtTimestamp(monitor.last_recovery_success_at))}</span></div>`
+                    : ""}
+                  ${monitor.last_recovery_failure_at
+                    ? `<div class="mini-row"><span class="mini-row-name" style="color:var(--muted)">Last failed</span><span class="mini-time">${escapeHTML(fmtTimestamp(monitor.last_recovery_failure_at))}</span></div>`
+                    : ""}
+                </div>
+              ` : ""}
             </div>
 
-            <div class="detail-block">
-              <span class="detail-label">Recent monitor events</span>
-              ${recentEvents.length
-                ? recentEvents.map((event) => `
-                  <div class="result-row ${["check_failed", "recovery_failed"].includes(event.event_type) ? "fail" : ""}">
-                    <div class="result-top">
-                      <span class="result-name">${escapeHTML(eventTypeLabel(event))}</span>
-                      <span class="mono">${escapeHTML(fmtTimestamp(event.timestamp))}</span>
+            <div class="mini-panel">
+              <div class="mini-panel-label">Recent events</div>
+              ${recentEvts.length
+                ? recentEvts.map((event) => `
+                  <div class="mini-row">
+                    <div>
+                      <div class="mini-row-name">${escapeHTML((event.event_type || "event").replaceAll("_", " "))}</div>
+                      ${eventReason(event) ? `<div class="check-msg" style="margin-top:2px">${escapeHTML(eventReason(event))}</div>` : ""}
                     </div>
-                    <div class="result-message">${escapeHTML(eventReason(event) || "No explicit reason attached to this event.")}</div>
-                    ${event.recovery_results && event.recovery_results.length
-                      ? `<div class="mono">${escapeHTML(event.recovery_results.map((result) => `${result.name || result.type}: ${result.success ? "ok" : (result.message || "failed")}`).join("\n"))}</div>`
-                      : ""}
+                    <div class="mini-row-right">
+                      <span class="mini-time">${escapeHTML(fmtTimestamp(event.timestamp))}</span>
+                      <span class="mini-status ${eventStatusCls(event)}">${eventStatusLabel(event)}</span>
+                    </div>
                   </div>
                 `).join("")
-                : `<div class="result-row"><div class="result-message">No recent event history available for this monitor.</div></div>`}
+                : `<div class="detail-empty">No events recorded yet.</div>`
+              }
             </div>
+
           </div>
+
+          <div class="meta-footer">
+            <div class="meta-pair">
+              <span class="meta-pair-key">id</span>
+              <span class="meta-pair-val">${escapeHTML(monitor.id)}</span>
+            </div>
+            <div class="meta-pair">
+              <span class="meta-pair-key">target</span>
+              <span class="meta-pair-val">${escapeHTML(formatTargetLabel(monitor))}</span>
+            </div>
+            ${monitor.interval ? `
+            <div class="meta-pair">
+              <span class="meta-pair-key">interval</span>
+              <span class="meta-pair-val">${escapeHTML(monitor.interval)}</span>
+            </div>` : ""}
+            ${monitor.cooldown ? `
+            <div class="meta-pair">
+              <span class="meta-pair-key">cooldown</span>
+              <span class="meta-pair-val">${escapeHTML(monitor.cooldown)}</span>
+            </div>` : ""}
+          </div>
+
         </div>
       `;
+
       syncControlUI();
     }
 
