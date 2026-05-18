@@ -32,6 +32,42 @@ func (ShellRunner) Run(ctx context.Context, command string) (Outcome, error) {
 	return outcome, err
 }
 
+func FailureMessage(prefix string, exitCode int) string {
+	return prefix + " failed with " + ExitCodeDescription(exitCode)
+}
+
+func ExitCodeDescription(exitCode int) string {
+	if exitCode >= 129 && exitCode <= 192 {
+		signal := exitCode - 128
+		if name := signalName(signal); name != "" {
+			return "exit code " + strconv.Itoa(exitCode) + " (terminated by " + name + ")"
+		}
+		return "exit code " + strconv.Itoa(exitCode) + " (terminated by signal " + strconv.Itoa(signal) + ")"
+	}
+	return "exit code " + strconv.Itoa(exitCode)
+}
+
+func signalName(signal int) string {
+	switch signal {
+	case 1:
+		return "SIGHUP"
+	case 2:
+		return "SIGINT"
+	case 3:
+		return "SIGQUIT"
+	case 6:
+		return "SIGABRT"
+	case 9:
+		return "SIGKILL"
+	case 14:
+		return "SIGALRM"
+	case 15:
+		return "SIGTERM"
+	default:
+		return ""
+	}
+}
+
 func BuildSystemdIsActiveCommand(target config.TargetConfig, service string) string {
 	return buildSystemdCommand(target, "systemctl is-active --quiet "+shellQuote(service))
 }

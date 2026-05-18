@@ -56,7 +56,7 @@ func runCommand(ctx context.Context, runner command.Runner, _ config.MonitorConf
 	outcome, err := runner.Run(ctx, action.Command)
 	output := limitString(outcome.Output, 2048)
 	if err != nil {
-		return false, fmt.Sprintf("command failed with exit code %d", outcome.ExitCode), output
+		return false, command.FailureMessage("command", outcome.ExitCode), output
 	}
 	return true, "", output
 }
@@ -71,7 +71,7 @@ func runDockerExec(ctx context.Context, runner command.Runner, monitor config.Mo
 	outcome, err := runner.Run(ctx, command.BuildDockerExecCommand(monitor.Target, action.Container, action.Command))
 	output := limitString(outcome.Output, 2048)
 	if err != nil {
-		return false, fmt.Sprintf("docker_exec failed with exit code %d", outcome.ExitCode), output
+		return false, command.FailureMessage("docker_exec", outcome.ExitCode), output
 	}
 	return true, "", output
 }
@@ -100,7 +100,7 @@ func runRestartSystemdService(ctx context.Context, runner command.Runner, monito
 	outcome, err := runner.Run(ctx, command.BuildSystemdRestartCommand(monitor.Target, service))
 	output := limitString(outcome.Output, 2048)
 	if err != nil {
-		return false, fmt.Sprintf("restart_systemd_service failed with exit code %d", outcome.ExitCode), output
+		return false, command.FailureMessage("restart_systemd_service", outcome.ExitCode), output
 	}
 	return true, "", output
 }
@@ -113,7 +113,7 @@ func runRestartDockerContainer(ctx context.Context, runner command.Runner, monit
 	outcome, err := runner.Run(ctx, command.BuildDockerRestartCommand(monitor.Target, container))
 	output := limitString(outcome.Output, 2048)
 	if err != nil {
-		return false, fmt.Sprintf("restart_docker_container failed with exit code %d", outcome.ExitCode), output
+		return false, command.FailureMessage("restart_docker_container", outcome.ExitCode), output
 	}
 	return true, "", output
 }

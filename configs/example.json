@@ -105,7 +105,7 @@
           "name": "restart-arlo-plugin",
           "type": "docker_exec",
           "container": "scrypted",
-          "command": "pkill -f \"plugin_remote.py @scrypted/arlo\" >/dev/null 2>&1; exit 0"
+          "command": "pkill -f \"plugin_remote.py @scrypted/[a]rlo\" >/dev/null 2>&1; exit 0"
         },
         {
           "name": "wait-after-plugin-restart",

@@ -339,10 +339,10 @@ func runDockerExec(ctx context.Context, runner command.Runner, monitor config.Mo
 	}
 	expectedExitCode := check.ExpectedExitCode
 	if outcome.ExitCode != expectedExitCode {
-		return false, fmt.Sprintf("docker_exec exit code %d != %d", outcome.ExitCode, expectedExitCode), observations
+		return false, fmt.Sprintf("docker_exec %s != %d", command.ExitCodeDescription(outcome.ExitCode), expectedExitCode), observations
 	}
 	if err != nil && outcome.ExitCode != expectedExitCode {
-		return false, fmt.Sprintf("docker_exec failed with exit code %d", outcome.ExitCode), observations
+		return false, command.FailureMessage("docker_exec", outcome.ExitCode), observations
 	}
 	if len(check.ExpectedOutputPatterns) > 0 {
 		matched, err := matchPatterns(output, check.ExpectedOutputPatterns, check.MatchAll)
@@ -377,10 +377,10 @@ func runCommand(ctx context.Context, runner command.Runner, _ config.MonitorConf
 	}
 	expectedExitCode := check.ExpectedExitCode
 	if outcome.ExitCode != expectedExitCode {
-		return false, fmt.Sprintf("command exit code %d != %d", outcome.ExitCode, expectedExitCode), observations
+		return false, fmt.Sprintf("command %s != %d", command.ExitCodeDescription(outcome.ExitCode), expectedExitCode), observations
 	}
 	if err != nil && outcome.ExitCode != expectedExitCode {
-		return false, fmt.Sprintf("command failed with exit code %d", outcome.ExitCode), observations
+		return false, command.FailureMessage("command", outcome.ExitCode), observations
 	}
 	if len(check.ExpectedOutputPatterns) > 0 {
 		matched, err := matchPatterns(output, check.ExpectedOutputPatterns, check.MatchAll)
