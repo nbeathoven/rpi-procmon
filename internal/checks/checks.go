@@ -417,6 +417,9 @@ func runSystemdService(ctx context.Context, runner command.Runner, monitor confi
 		"exit_code": outcome.ExitCode,
 	}
 	if err != nil || outcome.ExitCode != 0 {
+		if normalizedTransport(monitor.Target.Transport) == "ssh" && outcome.ExitCode == 255 {
+			return false, fmt.Sprintf("SSH failed while checking systemd service %s; the remote service state is unknown", service), observations
+		}
 		return false, fmt.Sprintf("systemd service %s is not active", service), observations
 	}
 	return true, "", observations

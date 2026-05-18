@@ -40,11 +40,18 @@ func ExitCodeDescription(exitCode int) string {
 	if exitCode >= 129 && exitCode <= 192 {
 		signal := exitCode - 128
 		if name := signalName(signal); name != "" {
-			return "exit code " + strconv.Itoa(exitCode) + " (terminated by " + name + ")"
+			return "exit code " + strconv.Itoa(exitCode) + " (terminated by " + name + signalExplanation(signal) + ")"
 		}
 		return "exit code " + strconv.Itoa(exitCode) + " (terminated by signal " + strconv.Itoa(signal) + ")"
 	}
 	return "exit code " + strconv.Itoa(exitCode)
+}
+
+func SSHFailureMessage(action string, exitCode int) string {
+	if exitCode == 255 {
+		return action + " failed with exit code 255 (SSH connection/authentication failure; the remote command may not have run)"
+	}
+	return FailureMessage(action, exitCode)
 }
 
 func signalName(signal int) string {
@@ -63,6 +70,17 @@ func signalName(signal int) string {
 		return "SIGALRM"
 	case 15:
 		return "SIGTERM"
+	default:
+		return ""
+	}
+}
+
+func signalExplanation(signal int) string {
+	switch signal {
+	case 9:
+		return "; force-killed"
+	case 15:
+		return "; asked to stop"
 	default:
 		return ""
 	}

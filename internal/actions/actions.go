@@ -100,7 +100,7 @@ func runRestartSystemdService(ctx context.Context, runner command.Runner, monito
 	outcome, err := runner.Run(ctx, command.BuildSystemdRestartCommand(monitor.Target, service))
 	output := limitString(outcome.Output, 2048)
 	if err != nil {
-		return false, command.FailureMessage("restart_systemd_service", outcome.ExitCode), output
+		return false, command.SSHFailureMessage("restart_systemd_service", outcome.ExitCode), output
 	}
 	return true, "", output
 }

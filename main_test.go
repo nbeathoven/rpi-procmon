@@ -454,6 +454,80 @@ func TestRecoveryFlowSupportsRestartSystemdService(t *testing.T) {
 	}
 }
 
+func TestRemoteSystemdCheckReportsSSHFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	sshTarget := config.TargetConfig{
+		Transport:    "ssh",
+		Host:         "SafaSnooper.local",
+		User:         "nima",
+		Port:         22,
+		IdentityFile: "/home/nima/.ssh/id_ed25519",
+	}
+	checkCommand := command.BuildSystemdIsActiveCommand(sshTarget, "snooper-gui")
+
+	runner := &fakeRunner{
+		responses: map[string][]command.Outcome{
+			checkCommand: {{Output: "ssh: Could not resolve hostname safasnooper.local", ExitCode: 255}},
+		},
+		errors: map[string][]error{
+			checkCommand: {errors.New("ssh failed")},
+		},
+	}
+
+	cfg := config.Config{
+		ConfigFile: filepath.Join(tmpDir, "config.json"),
+		LogFile:    filepath.Join(tmpDir, "procmon.log"),
+		StateFile:  filepath.Join(tmpDir, "state.json"),
+		EventsFile: filepath.Join(tmpDir, "events.json"),
+		API: config.APIConfig{
+			ListenAddress: "127.0.0.1:9645",
+		},
+		Monitors: []config.MonitorConfig{{
+			ID:               "snooper-gui",
+			Name:             "Snooper GUI",
+			Type:             "systemd-service",
+			Interval:         "1m",
+			FailureThreshold: 2,
+			Cooldown:         "1m",
+			Target:           sshTarget,
+			Checks: []config.CheckConfig{{
+				ID:      "service",
+				Name:    "service",
+				Type:    "systemd_service",
+				Service: "snooper-gui",
+			}},
+		}},
+	}
+
+	logger, closeLog, err := logging.Open(cfg.LogFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeLog()
+
+	manager, err := engine.NewManager(cfg, logger, runner, "test")
+	if err != nil {
+		t.Fatalf("engine.NewManager failed: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager.Start(ctx)
+
+	time.Sleep(50 * time.Millisecond)
+	monitor, ok := manager.MonitorSnapshot("snooper-gui")
+	if !ok {
+		t.Fatal("monitor state missing")
+	}
+	if len(monitor.LastFailureReasons) != 1 {
+		t.Fatalf("expected one failure reason, got %#v", monitor.LastFailureReasons)
+	}
+	want := "SSH failed while checking systemd service snooper-gui; the remote service state is unknown"
+	if monitor.LastFailureReasons[0] != want {
+		t.Fatalf("failure reason = %q, want %q", monitor.LastFailureReasons[0], want)
+	}
+}
+
 func TestRecoveryFlowSupportsRestartDockerContainer(t *testing.T) {
 	tmpDir := t.TempDir()
 	sshTarget := config.TargetConfig{
