@@ -287,6 +287,7 @@ func (m *Manager) runMonitorCycle(ctx context.Context, monitor config.MonitorCon
 		monitorState.LastSuccessAt = finished.Format(time.RFC3339)
 		monitorState.LastError = ""
 		monitorState.LastFailureReasons = nil
+		monitorState.RecoveryExhausted = false
 		if shouldRecordHealthyEvent(statusBeforeCheck) {
 			m.appendEventLocked(events.Event{
 				ID:           eventID(monitor.ID, finished),
@@ -335,6 +336,18 @@ func (m *Manager) runMonitorCycle(ctx context.Context, monitor config.MonitorCon
 	if !shouldRecover {
 		return
 	}
+
+	m.mu.Lock()
+	monitorState = m.ensureMonitorStateLocked(monitor)
+	if recoveryAttemptsExhausted(monitorState, monitor) {
+		failedAttempts := monitorState.RecoveryFailureCount
+		m.markRecoveryExhaustedLocked(monitorState, monitor, results, reasons)
+		m.persistOrLogLocked()
+		m.mu.Unlock()
+		logging.Logf(m.logger, "monitor recovery exhausted: id=%s failed_attempts=%d max_attempts=%d", monitor.ID, failedAttempts, monitor.MaxRecoveryAttempts)
+		return
+	}
+	m.mu.Unlock()
 
 	actionResults, recovered, postResults, postReasons := m.executeRecovery(ctx, monitor, results, reasons, "degraded")
 
@@ -457,6 +470,7 @@ func (m *Manager) applyRecoveryOutcomeLocked(monitorState *state.MonitorRuntimeS
 		monitorState.LastSuccessAt = now.Format(time.RFC3339)
 		monitorState.LastError = ""
 		monitorState.LastFailureReasons = nil
+		monitorState.RecoveryExhausted = false
 		if len(postResults) > 0 {
 			monitorState.LastCheckResults = state.CloneCheckResults(postResults)
 		}
@@ -501,6 +515,51 @@ func (m *Manager) applyRecoveryOutcomeLocked(monitorState *state.MonitorRuntimeS
 		CheckResults:        postResults,
 		RecoveryResults:     actionResults,
 	})
+	if recoveryAttemptsExhausted(monitorState, monitor) {
+		m.appendRecoveryExhaustedEventLocked(monitorState, monitor, postResults, postReasons)
+	}
+}
+
+func recoveryAttemptsExhausted(monitorState *state.MonitorRuntimeState, monitor config.MonitorConfig) bool {
+	return monitor.MaxRecoveryAttempts > 0 && monitorState.RecoveryFailureCount >= monitor.MaxRecoveryAttempts
+}
+
+func (m *Manager) markRecoveryExhaustedLocked(monitorState *state.MonitorRuntimeState, monitor config.MonitorConfig, checkResults []state.CheckResult, reasons []string) {
+	if monitorState.RecoveryExhausted {
+		reason := fmt.Sprintf("recovery attempts exhausted after %d failed attempts", monitorState.RecoveryFailureCount)
+		monitorState.Status = "failed"
+		monitorState.LastError = reason
+		monitorState.LastFailureReasons = []string{reason}
+		return
+	}
+	m.appendRecoveryExhaustedEventLocked(monitorState, monitor, checkResults, reasons)
+}
+
+func (m *Manager) appendRecoveryExhaustedEventLocked(monitorState *state.MonitorRuntimeState, monitor config.MonitorConfig, checkResults []state.CheckResult, reasons []string) {
+	now := time.Now().UTC()
+	reason := fmt.Sprintf("recovery attempts exhausted after %d failed attempts", monitorState.RecoveryFailureCount)
+	if joinedReasons := joinReasons(reasons); joinedReasons != "" {
+		reason += ": " + joinedReasons
+	}
+	monitorState.Status = "failed"
+	monitorState.LastError = reason
+	monitorState.LastFailureReasons = []string{reason}
+	monitorState.RecoveryExhausted = true
+	monitorState.CooldownUntil = now.Add(parseDuration(monitor.Cooldown, 5*time.Minute)).Format(time.RFC3339)
+	m.appendEventLocked(events.Event{
+		ID:                  eventID(monitor.ID, now),
+		Timestamp:           now.Format(time.RFC3339),
+		MonitorID:           monitor.ID,
+		MonitorName:         monitor.Name,
+		MonitorType:         monitor.Type,
+		EventType:           "recovery_exhausted",
+		StatusBefore:        "degraded",
+		StatusAfter:         "failed",
+		Reason:              reason,
+		ConsecutiveFailures: monitorState.ConsecutiveFailures,
+		RecoveryCount:       monitorState.RecoveryCount,
+		CheckResults:        checkResults,
+	})
 }
 
 func (m *Manager) lookupEnabledMonitor(id string) (config.MonitorConfig, error) {
@@ -542,6 +601,7 @@ func (m *Manager) ensureMonitorStateLocked(monitor config.MonitorConfig) *state.
 		existing.Enabled = monitor.IsEnabled()
 		existing.Interval = monitor.Interval
 		existing.FailureThreshold = monitor.FailureThreshold
+		existing.MaxRecoveryAttempts = monitor.MaxRecoveryAttempts
 		existing.Cooldown = monitor.Cooldown
 		existing.Target = monitor.Target
 		existing.Metadata = cloneStringMap(monitor.Metadata)
@@ -558,6 +618,7 @@ func (m *Manager) ensureMonitorStateLocked(monitor config.MonitorConfig) *state.
 		Status:               "unknown",
 		Interval:             monitor.Interval,
 		FailureThreshold:     monitor.FailureThreshold,
+		MaxRecoveryAttempts:  monitor.MaxRecoveryAttempts,
 		Cooldown:             monitor.Cooldown,
 		Target:               monitor.Target,
 		Metadata:             cloneStringMap(monitor.Metadata),

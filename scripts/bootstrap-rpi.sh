@@ -321,6 +321,7 @@ elif template == "scrypted_arlo":
         "type": "docker-log",
         "interval": os.environ["PROC_INTERVAL"],
         "failure_threshold": 1,
+        "max_recovery_attempts": int(os.environ.get("PROC_MAX_RECOVERY_ATTEMPTS", "0") or "0"),
         "cooldown": os.environ["PROC_COOLDOWN"],
         "target": target,
         "checks": [
@@ -351,6 +352,24 @@ elif template == "scrypted_arlo":
                     "HTTP error 401 .*fullFrameSnapshot",
                     "Error discovering devices: Arlo client not connected, cannot discover devices",
                     "Error during periodic device discovery: Arlo client not connected, cannot discover devices",
+                ],
+                "success_patterns": [
+                    "Arlo Cloud login successful\\.",
+                    "Subscribed to Arlo event stream successfully\\.",
+                    "Arlo plugin initialized\\.",
+                ],
+            },
+            {
+                "id": "arlo-multi-camera-stream-errors",
+                "type": "docker_log_pattern",
+                "container": os.environ["PROC_CONTAINER_NAME"],
+                "since": os.environ["PROC_LOG_SINCE"],
+                "match_count_threshold": int(os.environ["PROC_MATCH_THRESHOLD"]),
+                "distinct_match_group_threshold": int(os.environ.get("PROC_DISTINCT_CAMERA_THRESHOLD", "0") or "0"),
+                "patterns": [
+                    "\\[([^\\]]+)\\]: Arlo Cloud snapshot failed: Timed out waiting for snapshot URL from Arlo Cloud",
+                    "\\[([^\\]]+)\\]: Timeout waiting for ICE candidates, falling back to ignore trickle\\.",
+                    "\\[([^\\]]+)\\]: Failed to create or retrieve any snapshot",
                 ],
                 "success_patterns": [
                     "Arlo Cloud login successful\\.",
@@ -820,6 +839,8 @@ add_scrypted_arlo_monitor() {
   cooldown="$(prompt_default "Scrypted Arlo recovery cooldown" "20m")"
   log_since="$(prompt_default "Scrypted Arlo log scan window (duration like 30m or 1h)" "30m")"
   match_threshold="$(prompt_default "Scrypted Arlo matching error lines required before recovery" "2")"
+  distinct_camera_threshold="$(prompt_default "Scrypted Arlo distinct cameras required before stream recovery" "2")"
+  max_recovery_attempts="$(prompt_default "Scrypted Arlo max failed recovery attempts before suppression" "5")"
   recovery_target="$(prompt_default "Primary recovery target (plugin or scrypted)" "plugin")"
   recovery_target="$(printf '%s' "$recovery_target" | tr '[:upper:]' '[:lower:]')"
 
@@ -852,6 +873,8 @@ add_scrypted_arlo_monitor() {
   export PROC_COOLDOWN="$cooldown"
   export PROC_LOG_SINCE="$log_since"
   export PROC_MATCH_THRESHOLD="$match_threshold"
+  export PROC_DISTINCT_CAMERA_THRESHOLD="$distinct_camera_threshold"
+  export PROC_MAX_RECOVERY_ATTEMPTS="$max_recovery_attempts"
   export PROC_PLUGIN_RESTART_CMD="$plugin_restart_cmd"
   append_monitor_json
 }

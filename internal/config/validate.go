@@ -85,6 +85,12 @@ func validateCheck(monitorID string, check CheckConfig) error {
 				return fmt.Errorf("monitor %q check %q since %q is invalid: %w", monitorID, check.ID, check.Since, err)
 			}
 		}
+		if check.MatchCountThreshold < 0 {
+			return fmt.Errorf("monitor %q check %q match_count_threshold must not be negative", monitorID, check.ID)
+		}
+		if check.DistinctMatchGroupThreshold < 0 {
+			return fmt.Errorf("monitor %q check %q distinct_match_group_threshold must not be negative", monitorID, check.ID)
+		}
 	case "docker_exec":
 		if strings.TrimSpace(check.Container) == "" {
 			return fmt.Errorf("monitor %q check %q missing container", monitorID, check.ID)

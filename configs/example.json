@@ -60,6 +60,7 @@
       "type": "docker-log",
       "interval": "5m",
       "failure_threshold": 1,
+      "max_recovery_attempts": 5,
       "cooldown": "20m",
       "target": {
         "transport": "local"
@@ -92,6 +93,24 @@
             "HTTP error 401 .*fullFrameSnapshot",
             "Error discovering devices: Arlo client not connected, cannot discover devices",
             "Error during periodic device discovery: Arlo client not connected, cannot discover devices"
+          ],
+          "success_patterns": [
+            "Arlo Cloud login successful\\.",
+            "Subscribed to Arlo event stream successfully\\.",
+            "Arlo plugin initialized\\."
+          ]
+        },
+        {
+          "id": "arlo-multi-camera-stream-errors",
+          "type": "docker_log_pattern",
+          "container": "scrypted",
+          "since": "30m",
+          "match_count_threshold": 2,
+          "distinct_match_group_threshold": 2,
+          "patterns": [
+            "\\[([^\\]]+)\\]: Arlo Cloud snapshot failed: Timed out waiting for snapshot URL from Arlo Cloud",
+            "\\[([^\\]]+)\\]: Timeout waiting for ICE candidates, falling back to ignore trickle\\.",
+            "\\[([^\\]]+)\\]: Failed to create or retrieve any snapshot"
           ],
           "success_patterns": [
             "Arlo Cloud login successful\\.",

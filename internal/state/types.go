@@ -20,6 +20,7 @@ type MonitorRuntimeState struct {
 	Status                string                `json:"status"`
 	Interval              string                `json:"interval"`
 	FailureThreshold      int                   `json:"failure_threshold"`
+	MaxRecoveryAttempts   int                   `json:"max_recovery_attempts,omitempty"`
 	Cooldown              string                `json:"cooldown"`
 	Target                config.TargetConfig   `json:"target,omitempty"`
 	Metadata              map[string]string     `json:"metadata,omitempty"`
@@ -41,6 +42,7 @@ type MonitorRuntimeState struct {
 	FailureCount          int                   `json:"failure_count"`
 	RecoveryCount         int                   `json:"recovery_count"`
 	RecoveryFailureCount  int                   `json:"recovery_failure_count"`
+	RecoveryExhausted     bool                  `json:"recovery_exhausted,omitempty"`
 	LastError             string                `json:"last_error,omitempty"`
 	LastFailureReasons    []string              `json:"last_failure_reasons,omitempty"`
 	LastCheckResults      []CheckResult         `json:"last_check_results,omitempty"`

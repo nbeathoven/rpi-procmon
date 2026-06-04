@@ -88,6 +88,9 @@ func Normalize(cfg *Config) error {
 		if mon.FailureThreshold <= 0 {
 			mon.FailureThreshold = 1
 		}
+		if mon.MaxRecoveryAttempts < 0 {
+			return fmt.Errorf("monitor %q max_recovery_attempts must not be negative", mon.ID)
+		}
 		if strings.TrimSpace(mon.Cooldown) == "" {
 			mon.Cooldown = "5m"
 		}

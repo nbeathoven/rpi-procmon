@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	stdruntime "runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -279,6 +280,10 @@ func runDockerLogPattern(ctx context.Context, runner command.Runner, monitor con
 	if regexErr != nil {
 		return false, regexErr.Error(), nil
 	}
+	distinctMatches, distinctErr := distinctPatternCaptureGroups(logText, check.Patterns)
+	if distinctErr != nil {
+		return false, distinctErr.Error(), nil
+	}
 	successCount, matchedSuccessPatterns, regexErr := countPatternMatches(logText, check.SuccessPatterns)
 	if regexErr != nil {
 		return false, regexErr.Error(), nil
@@ -287,16 +292,22 @@ func runDockerLogPattern(ctx context.Context, runner command.Runner, monitor con
 	if threshold <= 0 {
 		threshold = 1
 	}
+	distinctThreshold := check.DistinctMatchGroupThreshold
 	observations := map[string]any{
 		"container":                check.Container,
 		"since":                    since,
 		"match_count":              count,
 		"threshold":                threshold,
 		"matched_patterns":         matchedPatterns,
+		"distinct_match_count":     len(distinctMatches),
+		"distinct_matches":         distinctMatches,
 		"success_match_count":      successCount,
 		"matched_success_patterns": matchedSuccessPatterns,
 		"transport":                normalizedTransport(monitor.Target.Transport),
 		"host":                     strings.TrimSpace(monitor.Target.Host),
+	}
+	if distinctThreshold > 0 {
+		observations["distinct_match_group_threshold"] = distinctThreshold
 	}
 	if len(check.SuccessPatterns) > 0 {
 		lastFailureAt, lastSuccessAt, timelineErr := findLatestPatternTimestamps(logText, check.Patterns, check.SuccessPatterns)
@@ -315,6 +326,9 @@ func runDockerLogPattern(ctx context.Context, runner command.Runner, monitor con
 		}
 	}
 	if count >= threshold {
+		if distinctThreshold > 0 && len(distinctMatches) < distinctThreshold {
+			return true, "", observations
+		}
 		return false, fmt.Sprintf("docker log pattern matched %d times in %s", count, since), observations
 	}
 	return true, "", observations
@@ -633,6 +647,44 @@ func countPatternMatches(logText string, patterns []string) (int, []string, erro
 		}
 	}
 	return matchCount, matched, nil
+}
+
+func distinctPatternCaptureGroups(logText string, patterns []string) ([]string, error) {
+	if len(patterns) == 0 {
+		return nil, nil
+	}
+	regexes := make([]*regexp.Regexp, 0, len(patterns))
+	for _, pattern := range patterns {
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("invalid pattern %q: %w", pattern, err)
+		}
+		regexes = append(regexes, re)
+	}
+
+	distinctSet := make(map[string]struct{})
+	scanner := bufio.NewScanner(bytes.NewBufferString(logText))
+	for scanner.Scan() {
+		line := scanner.Text()
+		for _, re := range regexes {
+			match := re.FindStringSubmatch(line)
+			if len(match) < 2 {
+				continue
+			}
+			value := strings.TrimSpace(match[1])
+			if value != "" {
+				distinctSet[value] = struct{}{}
+			}
+			break
+		}
+	}
+
+	distinct := make([]string, 0, len(distinctSet))
+	for value := range distinctSet {
+		distinct = append(distinct, value)
+	}
+	sort.Strings(distinct)
+	return distinct, nil
 }
 
 func findLatestPatternTimestamps(logText string, failurePatterns []string, successPatterns []string) (time.Time, time.Time, error) {

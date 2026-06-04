@@ -707,6 +707,159 @@ func TestDockerLogSuccessSupersedesEarlierFailures(t *testing.T) {
 	}
 }
 
+func TestDockerLogPatternRequiresDistinctCapturedCameras(t *testing.T) {
+	tmpDir := t.TempDir()
+	logCommand := "docker logs --timestamps --since '30m' 'scrypted' 2>&1"
+	restartCommand := "restart-arlo"
+	runner := &fakeRunner{
+		responses: map[string][]command.Outcome{
+			logCommand: {{
+				Output: strings.Join([]string{
+					"2026-06-04T00:26:49Z [Cam 2 - Deck]: Arlo Cloud snapshot failed: Timed out waiting for snapshot URL from Arlo Cloud",
+					"2026-06-04T00:27:04Z [Cam 4 - Under Deck]: Timeout waiting for ICE candidates, falling back to ignore trickle.",
+				}, "\n"),
+				ExitCode: 0,
+			}},
+			restartCommand: {{Output: "restarted", ExitCode: 0}},
+		},
+	}
+
+	cfg := config.Config{
+		ConfigFile: filepath.Join(tmpDir, "config.json"),
+		LogFile:    filepath.Join(tmpDir, "procmon.log"),
+		StateFile:  filepath.Join(tmpDir, "state.json"),
+		EventsFile: filepath.Join(tmpDir, "events.json"),
+		API:        config.APIConfig{ListenAddress: "127.0.0.1:9645"},
+		Monitors: []config.MonitorConfig{{
+			ID:               "scrypted-arlo",
+			Name:             "Scrypted Arlo",
+			Type:             "docker-log",
+			Interval:         "1m",
+			FailureThreshold: 1,
+			Cooldown:         "0s",
+			Checks: []config.CheckConfig{{
+				ID:                          "arlo-multi-camera-stream-errors",
+				Type:                        "docker_log_pattern",
+				Container:                   "scrypted",
+				Since:                       "30m",
+				MatchCountThreshold:         2,
+				DistinctMatchGroupThreshold: 2,
+				Patterns: []string{
+					"\\[([^\\]]+)\\]: Arlo Cloud snapshot failed: Timed out waiting for snapshot URL from Arlo Cloud",
+					"\\[([^\\]]+)\\]: Timeout waiting for ICE candidates, falling back to ignore trickle\\.",
+				},
+			}},
+			Recovery: []config.ActionConfig{{
+				Name:    "restart",
+				Type:    "command",
+				Command: restartCommand,
+			}},
+		}},
+	}
+
+	logger, closeLog, err := logging.Open(cfg.LogFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeLog()
+
+	manager, err := engine.NewManager(cfg, logger, runner, "test")
+	if err != nil {
+		t.Fatalf("engine.NewManager failed: %v", err)
+	}
+	monitor, err := manager.TriggerCheck(context.Background(), "scrypted-arlo")
+	if err != nil {
+		t.Fatalf("TriggerCheck failed: %v", err)
+	}
+	if monitor.RecoveryCount != 1 {
+		t.Fatalf("expected recovery for two distinct cameras, got %d", monitor.RecoveryCount)
+	}
+	if got := monitor.LastCheckResults[0].Observations["distinct_match_count"]; got != 2 {
+		t.Fatalf("expected two distinct camera matches, got %#v", got)
+	}
+}
+
+func TestRecoveryExhaustsAfterMaxFailedAttempts(t *testing.T) {
+	tmpDir := t.TempDir()
+	checkCommand := "check-arlo"
+	restartCommand := "restart-arlo"
+	runner := &fakeRunner{
+		responses: map[string][]command.Outcome{
+			checkCommand:   {{Output: "still broken", ExitCode: 1}},
+			restartCommand: {{Output: "restarted", ExitCode: 0}},
+		},
+	}
+
+	cfg := config.Config{
+		ConfigFile: filepath.Join(tmpDir, "config.json"),
+		LogFile:    filepath.Join(tmpDir, "procmon.log"),
+		StateFile:  filepath.Join(tmpDir, "state.json"),
+		EventsFile: filepath.Join(tmpDir, "events.json"),
+		API:        config.APIConfig{ListenAddress: "127.0.0.1:9645"},
+		Monitors: []config.MonitorConfig{{
+			ID:                  "scrypted-arlo",
+			Name:                "Scrypted Arlo",
+			Type:                "docker-log",
+			Interval:            "1m",
+			FailureThreshold:    1,
+			MaxRecoveryAttempts: 5,
+			Cooldown:            "0s",
+			Checks: []config.CheckConfig{{
+				ID:      "arlo-health",
+				Type:    "command",
+				Command: checkCommand,
+			}},
+			Recovery: []config.ActionConfig{{
+				Name:    "restart",
+				Type:    "command",
+				Command: restartCommand,
+			}, {
+				Name: "recheck",
+				Type: "recheck",
+			}},
+		}},
+	}
+
+	logger, closeLog, err := logging.Open(cfg.LogFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeLog()
+
+	manager, err := engine.NewManager(cfg, logger, runner, "test")
+	if err != nil {
+		t.Fatalf("engine.NewManager failed: %v", err)
+	}
+	for i := 0; i < 6; i++ {
+		if _, err := manager.TriggerCheck(context.Background(), "scrypted-arlo"); err != nil {
+			t.Fatalf("TriggerCheck %d failed: %v", i+1, err)
+		}
+	}
+	monitor, ok := manager.MonitorSnapshot("scrypted-arlo")
+	if !ok {
+		t.Fatal("monitor state missing")
+	}
+	if monitor.RecoveryFailureCount != 5 {
+		t.Fatalf("expected five failed recoveries, got %d", monitor.RecoveryFailureCount)
+	}
+	if runner.counts[restartCommand] != 5 {
+		t.Fatalf("expected five restart attempts, got %d", runner.counts[restartCommand])
+	}
+	if !strings.Contains(monitor.LastError, "recovery attempts exhausted after 5 failed attempts") {
+		t.Fatalf("expected exhausted last error, got %q", monitor.LastError)
+	}
+	found := false
+	for _, event := range manager.EventsSnapshot(events.Filter{MonitorID: "scrypted-arlo", EventType: "recovery_exhausted", Limit: 10}) {
+		if strings.Contains(event.Reason, "recovery attempts exhausted after 5 failed attempts") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected recovery_exhausted event")
+	}
+}
+
 func TestStatusAPIExposesMonitorState(t *testing.T) {
 	enabled := true
 	cfg := config.Config{

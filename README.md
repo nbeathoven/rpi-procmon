@@ -245,6 +245,7 @@ Each monitor defines:
 - `target`
 - `interval`
 - `failure_threshold`
+- `max_recovery_attempts`: optional cap on failed automatic recovery runs before recovery is suppressed and a `recovery_exhausted` event is recorded
 - `cooldown`
 - `checks[]`
 - `recovery[]`
@@ -268,6 +269,8 @@ Checks currently supported:
 - `docker_exec`
 - `command`
 - `systemd_service`
+
+For `docker_log_pattern`, `distinct_match_group_threshold` can require matches from multiple distinct captured values. The first regex capture group is used as the identity, which is useful for rules like "only recover if this Arlo failure appears for at least two cameras."
 
 Recovery steps currently supported:
 - `command`
@@ -296,6 +299,7 @@ The state file stores everything the daemon tracks for each monitor, including:
 - cooldown expiry
 - consecutive failures
 - run counters and recovery counters
+- recovery exhaustion flag
 - last error and failure reasons
 - last check results with observations
 - last recovery action results with command output
