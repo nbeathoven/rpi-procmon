@@ -203,12 +203,9 @@ func TestRecoveryFlowUpdatesPerMonitorState(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	manager.Start(ctx)
-
-	time.Sleep(50 * time.Millisecond)
-	monitor, ok := manager.MonitorSnapshot("svc")
-	if !ok {
-		t.Fatal("monitor state missing")
+	monitor, err := manager.TriggerCheck(ctx, "svc")
+	if err != nil {
+		t.Fatalf("trigger check: %v", err)
 	}
 	if monitor.Status != "healthy" {
 		t.Fatalf("expected recovered healthy status, got %q", monitor.Status)
@@ -436,12 +433,9 @@ func TestRecoveryFlowSupportsRestartSystemdService(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	manager.Start(ctx)
-
-	time.Sleep(50 * time.Millisecond)
-	monitor, ok := manager.MonitorSnapshot("ma352")
-	if !ok {
-		t.Fatal("monitor state missing")
+	monitor, err := manager.TriggerCheck(ctx, "ma352")
+	if err != nil {
+		t.Fatalf("trigger check: %v", err)
 	}
 	if monitor.Status != "healthy" {
 		t.Fatalf("expected recovered healthy status, got %q", monitor.Status)
@@ -512,12 +506,9 @@ func TestRemoteSystemdCheckReportsSSHFailure(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	manager.Start(ctx)
-
-	time.Sleep(50 * time.Millisecond)
-	monitor, ok := manager.MonitorSnapshot("snooper-gui")
-	if !ok {
-		t.Fatal("monitor state missing")
+	monitor, err := manager.TriggerCheck(ctx, "snooper-gui")
+	if err != nil {
+		t.Fatalf("trigger check: %v", err)
 	}
 	if len(monitor.LastFailureReasons) != 1 {
 		t.Fatalf("expected one failure reason, got %#v", monitor.LastFailureReasons)
@@ -600,12 +591,9 @@ func TestRecoveryFlowSupportsRestartDockerContainer(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	manager.Start(ctx)
-
-	time.Sleep(50 * time.Millisecond)
-	monitor, ok := manager.MonitorSnapshot("scrypted")
-	if !ok {
-		t.Fatal("monitor state missing")
+	monitor, err := manager.TriggerCheck(ctx, "scrypted")
+	if err != nil {
+		t.Fatalf("trigger check: %v", err)
 	}
 	if monitor.Status != "healthy" {
 		t.Fatalf("expected recovered healthy status, got %q", monitor.Status)
@@ -689,12 +677,9 @@ func TestDockerLogSuccessSupersedesEarlierFailures(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	manager.Start(ctx)
-
-	time.Sleep(50 * time.Millisecond)
-	monitor, ok := manager.MonitorSnapshot("scrypted-arlo")
-	if !ok {
-		t.Fatal("monitor state missing")
+	monitor, err := manager.TriggerCheck(ctx, "scrypted-arlo")
+	if err != nil {
+		t.Fatalf("trigger check: %v", err)
 	}
 	if monitor.Status != "healthy" {
 		t.Fatalf("expected healthy status after later success, got %q", monitor.Status)

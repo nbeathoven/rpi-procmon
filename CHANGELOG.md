@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Preserve corrupted runtime state/event files as timestamped `.corrupt-*` files and rebuild empty runtime data instead of crash-looping. Configuration and I/O errors still fail startup.
+- Flush runtime files and their directory to disk around atomic replacement to improve durability across interrupted shutdowns.
+
 - App revision updated to `eddc6bb`.
 - Added admin-token-gated procmon control endpoints for manual `check` and `recover` actions.
 - Added versioned `/api/v1/...` API aliases while preserving existing read endpoints.

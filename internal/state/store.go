@@ -2,9 +2,8 @@ package state
 
 import (
 	"encoding/json"
-	"errors"
-	"os"
-	"path/filepath"
+
+	"github.com/nbeathoven/rpi-procmon/internal/persistence"
 )
 
 type Store interface {
@@ -17,18 +16,8 @@ type FileStore struct {
 }
 
 func (s FileStore) Load() (ProcmonState, error) {
-	var snapshot ProcmonState
-	data, err := os.ReadFile(s.Path)
+	snapshot, err := persistence.Load[ProcmonState](s.Path)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return ProcmonState{
-				Version:  SchemaVersion,
-				Monitors: make(map[string]*MonitorRuntimeState),
-			}, nil
-		}
-		return snapshot, err
-	}
-	if err := json.Unmarshal(data, &snapshot); err != nil {
 		return snapshot, err
 	}
 	if snapshot.Monitors == nil {
@@ -41,16 +30,9 @@ func (s FileStore) Load() (ProcmonState, error) {
 }
 
 func (s FileStore) Save(snapshot ProcmonState) error {
-	if err := os.MkdirAll(filepath.Dir(s.Path), 0755); err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := s.Path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.Path)
+	return persistence.Save(s.Path, data)
 }

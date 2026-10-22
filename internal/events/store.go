@@ -2,9 +2,8 @@ package events
 
 import (
 	"encoding/json"
-	"errors"
-	"os"
-	"path/filepath"
+
+	"github.com/nbeathoven/rpi-procmon/internal/persistence"
 )
 
 type Store interface {
@@ -18,15 +17,8 @@ type FileStore struct {
 }
 
 func (s FileStore) Load() (History, error) {
-	var history History
-	data, err := os.ReadFile(s.Path)
+	history, err := persistence.Load[History](s.Path)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return History{Version: SchemaVersion}, nil
-		}
-		return history, err
-	}
-	if err := json.Unmarshal(data, &history); err != nil {
 		return history, err
 	}
 	if history.Version == 0 {
@@ -39,18 +31,11 @@ func (s FileStore) Load() (History, error) {
 func (s FileStore) Save(history History) error {
 	history.Version = SchemaVersion
 	history.Events = trimToLimit(history.Events, s.MaxEntries)
-	if err := os.MkdirAll(filepath.Dir(s.Path), 0755); err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(history, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := s.Path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.Path)
+	return persistence.Save(s.Path, data)
 }
 
 func trimToLimit(in []Event, limit int) []Event {
