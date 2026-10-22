@@ -1,10 +1,15 @@
 package command
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/nbeathoven/rpi-procmon/internal/config"
 )
@@ -20,14 +25,54 @@ type Outcome struct {
 
 type ShellRunner struct{}
 
+const maxOutputBytes = 8 << 20
+
+type boundedOutput struct {
+	buffer   bytes.Buffer
+	overflow bool
+}
+
+func (b *boundedOutput) Write(p []byte) (int, error) {
+	n := len(p)
+	remaining := maxOutputBytes - b.buffer.Len()
+	if n > remaining {
+		b.overflow = true
+		p = p[:remaining]
+	}
+	_, _ = b.buffer.Write(p)
+	return n, nil
+}
+
 func (ShellRunner) Run(ctx context.Context, command string) (Outcome, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
-	output, err := cmd.CombinedOutput()
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 2 * time.Second
+	output := &boundedOutput{}
+	cmd.Stdout, cmd.Stderr = output, output
+	err := cmd.Run()
 	outcome := Outcome{
-		Output: strings.TrimSpace(string(output)),
+		Output: strings.TrimSpace(output.buffer.String()),
 	}
 	if cmd.ProcessState != nil {
 		outcome.ExitCode = cmd.ProcessState.ExitCode()
+	}
+	if ctx.Err() != nil {
+		err = ctx.Err()
+	} else if output.overflow {
+		err = fmt.Errorf("command output exceeds %d bytes", maxOutputBytes)
+	} else if errors.Is(err, exec.ErrWaitDelay) {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	if err != nil && outcome.ExitCode == 0 {
+		outcome.ExitCode = -1
+	}
+	if err != nil {
+		outcome.Output += "\n" + err.Error()
 	}
 	return outcome, err
 }
@@ -149,6 +194,9 @@ func buildSSHCommand(target config.TargetConfig, host string, remoteCommand stri
 	parts := []string{
 		"ssh",
 		"-o", "BatchMode=yes",
+		"-o", "ConnectTimeout=10",
+		"-o", "ServerAliveInterval=15",
+		"-o", "ServerAliveCountMax=2",
 		"-o", "StrictHostKeyChecking=accept-new",
 	}
 	if target.Port > 0 {

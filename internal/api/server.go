@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -230,7 +232,9 @@ func (a apiAuth) authorizeAdmin(r *http.Request) bool {
 		return false
 	}
 	token := bearerToken(r.Header.Get("Authorization"))
-	return token != "" && token == a.adminToken
+	expected := sha256.Sum256([]byte(a.adminToken))
+	provided := sha256.Sum256([]byte(token))
+	return token != "" && subtle.ConstantTimeCompare(provided[:], expected[:]) == 1
 }
 
 func bearerToken(header string) string {

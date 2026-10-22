@@ -1,6 +1,42 @@
 package command
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestShellRunnerCancelsDescendants(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	out, err := (ShellRunner{}).Run(ctx, "sleep 30 & wait")
+	if !errors.Is(err, context.DeadlineExceeded) || out.ExitCode == 0 {
+		t.Fatalf("expected deadline failure, got %+v %v", out, err)
+	}
+	if time.Since(start) > 3*time.Second {
+		t.Fatal("child process kept command blocked after deadline")
+	}
+}
+
+func TestShellRunnerRejectsTruncatedOutput(t *testing.T) {
+	out, err := (ShellRunner{}).Run(context.Background(), "head -c 8388609 /dev/zero")
+	if err == nil || out.ExitCode == 0 || !strings.Contains(out.Output, "output exceeds") {
+		t.Fatalf("expected explicit overflow failure: exit=%d err=%v", out.ExitCode, err)
+	}
+	if len(out.Output) > maxOutputBytes+128 {
+		t.Fatal("output cap was exceeded")
+	}
+}
+
+func TestShellRunnerPreservesSuccessfulOutput(t *testing.T) {
+	out, err := (ShellRunner{}).Run(context.Background(), "printf healthy")
+	if err != nil || out.ExitCode != 0 || out.Output != "healthy" {
+		t.Fatalf("unexpected result: %+v %v", out, err)
+	}
+}
 
 func TestExitCodeDescriptionIncludesCommonSignals(t *testing.T) {
 	got := ExitCodeDescription(143)

@@ -2,9 +2,21 @@ package config
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
+
+func validateDuration(value string, allowZero bool) error {
+	d, err := time.ParseDuration(strings.TrimSpace(value))
+	if err != nil {
+		return err
+	}
+	if d < 0 || (!allowZero && d == 0) {
+		return fmt.Errorf("duration must be positive (zero allowed: %t)", allowZero)
+	}
+	return nil
+}
 
 var supportedCheckTypes = map[string]struct{}{
 	"http_json":          {},
@@ -45,7 +57,7 @@ func validateTarget(monitorID string, target TargetConfig) error {
 				return fmt.Errorf("monitor %q target has empty fallback host", monitorID)
 			}
 		}
-		if target.Port < 0 {
+		if target.Port < 0 || target.Port > 65535 {
 			return fmt.Errorf("monitor %q target port %d is invalid", monitorID, target.Port)
 		}
 		return nil
@@ -58,6 +70,13 @@ func validateCheck(monitorID string, check CheckConfig) error {
 	if _, ok := supportedCheckTypes[check.Type]; !ok {
 		return fmt.Errorf("monitor %q check %q has unsupported type %q", monitorID, check.ID, check.Type)
 	}
+	for _, patterns := range [][]string{check.Patterns, check.SuccessPatterns, check.ExpectedOutputPatterns, check.ForbiddenOutputPatterns} {
+		for _, pattern := range patterns {
+			if _, err := regexp.Compile(pattern); err != nil {
+				return fmt.Errorf("monitor %q check %q invalid pattern %q: %w", monitorID, check.ID, pattern, err)
+			}
+		}
+	}
 
 	switch check.Type {
 	case "http_json":
@@ -65,7 +84,7 @@ func validateCheck(monitorID string, check CheckConfig) error {
 			return fmt.Errorf("monitor %q check %q missing url", monitorID, check.ID)
 		}
 		if strings.TrimSpace(check.Timeout) != "" {
-			if _, err := time.ParseDuration(strings.TrimSpace(check.Timeout)); err != nil {
+			if err := validateDuration(check.Timeout, false); err != nil {
 				return fmt.Errorf("monitor %q check %q timeout %q is invalid: %w", monitorID, check.ID, check.Timeout, err)
 			}
 		}
@@ -81,7 +100,7 @@ func validateCheck(monitorID string, check CheckConfig) error {
 			return fmt.Errorf("monitor %q check %q has no patterns", monitorID, check.ID)
 		}
 		if strings.TrimSpace(check.Since) != "" {
-			if _, err := time.ParseDuration(strings.TrimSpace(check.Since)); err != nil {
+			if err := validateDuration(check.Since, false); err != nil {
 				return fmt.Errorf("monitor %q check %q since %q is invalid: %w", monitorID, check.ID, check.Since, err)
 			}
 		}
@@ -144,7 +163,7 @@ func validateAction(monitorID string, action ActionConfig) error {
 		if strings.TrimSpace(action.Duration) == "" {
 			return fmt.Errorf("monitor %q recovery action %q missing duration", monitorID, action.Name)
 		}
-		if _, err := time.ParseDuration(strings.TrimSpace(action.Duration)); err != nil {
+		if err := validateDuration(action.Duration, true); err != nil {
 			return fmt.Errorf("monitor %q recovery action %q duration %q is invalid: %w", monitorID, action.Name, action.Duration, err)
 		}
 	}

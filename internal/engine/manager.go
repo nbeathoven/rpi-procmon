@@ -30,7 +30,8 @@ type Manager struct {
 	mu           sync.RWMutex
 	current      state.ProcmonState
 	eventHistory events.History
-	monitorLocks map[string]*sync.Mutex
+	eventsDirty  bool
+	monitorLocks map[string]chan struct{}
 }
 
 var (
@@ -67,12 +68,13 @@ func NewManager(cfg config.Config, logger io.Writer, runner command.Runner, appV
 		appVersion:   appVersion,
 		current:      snapshot,
 		eventHistory: eventHistory,
-		monitorLocks: make(map[string]*sync.Mutex, len(cfg.Monitors)),
+		eventsDirty:  true,
+		monitorLocks: make(map[string]chan struct{}, len(cfg.Monitors)),
 	}
 
 	manager.mu.Lock()
 	for _, monitor := range cfg.Monitors {
-		manager.monitorLocks[monitor.ID] = &sync.Mutex{}
+		manager.monitorLocks[monitor.ID] = make(chan struct{}, 1)
 		st := manager.ensureMonitorStateLocked(monitor)
 		if !monitor.IsEnabled() {
 			st.Status = "disabled"
@@ -103,9 +105,12 @@ func (m *Manager) TriggerCheck(ctx context.Context, id string) (*state.MonitorRu
 		return nil, err
 	}
 	interval := parseDuration(monitor.Interval, time.Minute)
-	m.withMonitorLock(monitor.ID, func() {
+	err = m.withMonitorLock(ctx, monitor.ID, func() {
 		m.runMonitorCycle(ctx, monitor, interval)
 	})
+	if err != nil {
+		return nil, err
+	}
 	snapshot, ok := m.MonitorSnapshot(id)
 	if !ok {
 		return nil, ErrMonitorNotFound
@@ -118,9 +123,16 @@ func (m *Manager) TriggerRecovery(ctx context.Context, id string) (*state.Monito
 	if err != nil {
 		return nil, err
 	}
-	m.withMonitorLock(monitor.ID, func() {
-		m.runForcedRecovery(ctx, monitor)
+	var recoveryErr error
+	err = m.withMonitorLock(ctx, monitor.ID, func() {
+		recoveryErr = m.runForcedRecovery(ctx, monitor)
 	})
+	if err != nil {
+		return nil, err
+	}
+	if recoveryErr != nil {
+		return nil, recoveryErr
+	}
 	snapshot, ok := m.MonitorSnapshot(id)
 	if !ok {
 		return nil, ErrMonitorNotFound
@@ -237,9 +249,11 @@ func (m *Manager) EventsSnapshot(filter events.Filter) []events.Event {
 
 func (m *Manager) runMonitorLoop(ctx context.Context, monitor config.MonitorConfig) {
 	interval := parseDuration(monitor.Interval, time.Minute)
-	m.withMonitorLock(monitor.ID, func() {
+	if err := m.withMonitorLock(ctx, monitor.ID, func() {
 		m.runMonitorCycle(ctx, monitor, interval)
-	})
+	}); err != nil {
+		return
+	}
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -249,14 +263,19 @@ func (m *Manager) runMonitorLoop(ctx context.Context, monitor config.MonitorConf
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			m.withMonitorLock(monitor.ID, func() {
+			if err := m.withMonitorLock(ctx, monitor.ID, func() {
 				m.runMonitorCycle(ctx, monitor, interval)
-			})
+			}); err != nil {
+				return
+			}
 		}
 	}
 }
 
 func (m *Manager) runMonitorCycle(ctx context.Context, monitor config.MonitorConfig, interval time.Duration) {
+	if ctx.Err() != nil {
+		return
+	}
 	start := time.Now().UTC()
 	statusBeforeCheck := ""
 
@@ -275,6 +294,12 @@ func (m *Manager) runMonitorCycle(ctx context.Context, monitor config.MonitorCon
 
 	m.mu.Lock()
 	monitorState = m.ensureMonitorStateLocked(monitor)
+	if ctx.Err() != nil {
+		monitorState.Status = statusBeforeCheck
+		m.persistOrLogLocked()
+		m.mu.Unlock()
+		return
+	}
 	monitorState.CheckRunCount++
 	monitorState.LastCheckFinishedAt = finished.Format(time.RFC3339)
 	monitorState.LastCheckDurationMS = durationMS
@@ -349,10 +374,20 @@ func (m *Manager) runMonitorCycle(ctx context.Context, monitor config.MonitorCon
 	}
 	m.mu.Unlock()
 
-	actionResults, recovered, postResults, postReasons := m.executeRecovery(ctx, monitor, results, reasons, "degraded")
+	actionResults, recovered, postResults, postReasons, err := m.executeRecovery(ctx, monitor, results, reasons, "degraded")
+	if err != nil {
+		logging.Logf(m.logger, "monitor recovery interrupted: id=%s error=%v", monitor.ID, err)
+		return
+	}
 
 	m.mu.Lock()
 	monitorState = m.ensureMonitorStateLocked(monitor)
+	if ctx.Err() != nil {
+		monitorState.Status = "degraded"
+		m.persistOrLogLocked()
+		m.mu.Unlock()
+		return
+	}
 	m.applyRecoveryOutcomeLocked(monitorState, monitor, actionResults, recovered, postResults, postReasons)
 	m.persistOrLogLocked()
 	m.mu.Unlock()
@@ -372,6 +407,9 @@ func (m *Manager) evaluateMonitor(ctx context.Context, monitor config.MonitorCon
 	results := make([]state.CheckResult, 0, len(monitor.Checks))
 	reasons := make([]string, 0)
 	for _, check := range monitor.Checks {
+		if ctx.Err() != nil {
+			break
+		}
 		result := checks.Run(ctx, m.runner, monitor, check)
 		results = append(results, result)
 		if !result.Success {
@@ -381,14 +419,27 @@ func (m *Manager) evaluateMonitor(ctx context.Context, monitor config.MonitorCon
 	return results, reasons
 }
 
-func (m *Manager) executeRecovery(ctx context.Context, monitor config.MonitorConfig, failureResults []state.CheckResult, failureReasons []string, statusBefore string) ([]state.ActionResult, bool, []state.CheckResult, []string) {
+func (m *Manager) executeRecovery(ctx context.Context, monitor config.MonitorConfig, failureResults []state.CheckResult, failureReasons []string, statusBefore string) ([]state.ActionResult, bool, []state.CheckResult, []string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, false, nil, nil, err
+	}
 	results := make([]state.ActionResult, 0, len(monitor.Recovery))
+	completed := false
+	defer func() {
+		if !completed {
+			m.mu.Lock()
+			m.ensureMonitorStateLocked(monitor).Status = statusBefore
+			m.persistOrLogLocked()
+			m.mu.Unlock()
+		}
+	}()
 
 	m.mu.Lock()
 	monitorState := m.ensureMonitorStateLocked(monitor)
 	monitorState.Status = "recovering"
 	now := time.Now().UTC()
 	monitorState.LastRecoveryAttemptAt = now.Format(time.RFC3339)
+	monitorState.CooldownUntil = now.Add(parseDuration(monitor.Cooldown, 5*time.Minute)).Format(time.RFC3339)
 	m.appendEventLocked(events.Event{
 		ID:                  eventID(monitor.ID, now),
 		Timestamp:           now.Format(time.RFC3339),
@@ -402,33 +453,54 @@ func (m *Manager) executeRecovery(ctx context.Context, monitor config.MonitorCon
 		ConsecutiveFailures: monitorState.ConsecutiveFailures,
 		CheckResults:        failureResults,
 	})
-	m.persistOrLogLocked()
+	err := m.persistLocked()
 	m.mu.Unlock()
+	if err != nil {
+		return nil, false, nil, nil, fmt.Errorf("persist recovery start: %w", err)
+	}
 	logging.Logf(m.logger, "monitor recovery start: id=%s actions=%d", monitor.ID, len(monitor.Recovery))
 
 	for _, action := range monitor.Recovery {
+		if err := ctx.Err(); err != nil {
+			return results, false, nil, nil, err
+		}
 		actionResult := actions.Run(ctx, m.runner, monitor, action)
 		results = append(results, actionResult)
+		if err := ctx.Err(); err != nil {
+			return results, false, nil, nil, err
+		}
 		logging.Logf(m.logger, "monitor recovery action: id=%s action=%s type=%s success=%t message=%s", monitor.ID, actionResult.Name, actionResult.Type, actionResult.Success, actionResult.Message)
 
 		if action.Type == "recheck" {
 			checkResults, reasons := m.evaluateMonitor(ctx, monitor)
+			if err := ctx.Err(); err != nil {
+				return results, false, nil, nil, err
+			}
 			if len(reasons) == 0 {
-				return results, true, checkResults, nil
+				completed = true
+				return results, true, checkResults, nil, nil
 			}
 			continue
 		}
 		if !actionResult.Success {
-			return results, false, nil, []string{actionResult.Message}
+			completed = true
+			return results, false, nil, []string{actionResult.Message}, nil
 		}
 	}
 
 	checkResults, reasons := m.evaluateMonitor(ctx, monitor)
-	return results, len(reasons) == 0, checkResults, reasons
+	if err := ctx.Err(); err != nil {
+		return results, false, nil, nil, err
+	}
+	completed = true
+	return results, len(reasons) == 0, checkResults, reasons, nil
 }
 
-func (m *Manager) runForcedRecovery(ctx context.Context, monitor config.MonitorConfig) {
+func (m *Manager) runForcedRecovery(ctx context.Context, monitor config.MonitorConfig) error {
 	preResults, preReasons := m.evaluateMonitor(ctx, monitor)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	statusBefore := "unknown"
 
 	m.mu.RLock()
@@ -443,19 +515,29 @@ func (m *Manager) runForcedRecovery(ctx context.Context, monitor config.MonitorC
 		preReasons = append(preReasons, "manual api recovery trigger")
 	}
 
-	actionResults, recovered, postResults, postReasons := m.executeRecovery(ctx, monitor, preResults, preReasons, statusBefore)
+	actionResults, recovered, postResults, postReasons, err := m.executeRecovery(ctx, monitor, preResults, preReasons, statusBefore)
+	if err != nil {
+		return err
+	}
 
 	m.mu.Lock()
 	monitorState := m.ensureMonitorStateLocked(monitor)
+	if err := ctx.Err(); err != nil {
+		monitorState.Status = statusBefore
+		m.persistOrLogLocked()
+		m.mu.Unlock()
+		return err
+	}
 	m.applyRecoveryOutcomeLocked(monitorState, monitor, actionResults, recovered, postResults, postReasons)
 	m.persistOrLogLocked()
 	m.mu.Unlock()
 
 	if recovered {
 		logging.Logf(m.logger, "manual recovery succeeded: id=%s actions=%d", monitor.ID, len(actionResults))
-		return
+		return nil
 	}
 	logging.Logf(m.logger, "manual recovery failed: id=%s actions=%d reasons=%s", monitor.ID, len(actionResults), joinReasons(postReasons))
+	return nil
 }
 
 func (m *Manager) applyRecoveryOutcomeLocked(monitorState *state.MonitorRuntimeState, monitor config.MonitorConfig, actionResults []state.ActionResult, recovered bool, postResults []state.CheckResult, postReasons []string) {
@@ -575,19 +657,33 @@ func (m *Manager) lookupEnabledMonitor(id string) (config.MonitorConfig, error) 
 	return config.MonitorConfig{}, ErrMonitorNotFound
 }
 
-func (m *Manager) withMonitorLock(id string, fn func()) {
+func (m *Manager) withMonitorLock(ctx context.Context, id string, fn func()) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	lock := m.monitorLock(id)
-	lock.Lock()
-	defer lock.Unlock()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case lock <- struct{}{}:
+	}
+	defer func() { <-lock }()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	fn()
+	return ctx.Err()
 }
 
-func (m *Manager) monitorLock(id string) *sync.Mutex {
+func (m *Manager) monitorLock(id string) chan struct{} {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	lock, ok := m.monitorLocks[id]
 	if !ok {
-		lock = &sync.Mutex{}
+		lock = make(chan struct{}, 1)
+		if m.monitorLocks == nil {
+			m.monitorLocks = make(map[string]chan struct{})
+		}
 		m.monitorLocks[id] = lock
 	}
 	return lock
@@ -643,10 +739,18 @@ func (m *Manager) persistLocked() error {
 		return err
 	}
 	m.eventHistory.Version = events.SchemaVersion
-	return m.eventStore.Save(m.eventHistory)
+	if !m.eventsDirty {
+		return nil
+	}
+	if err := m.eventStore.Save(m.eventHistory); err != nil {
+		return err
+	}
+	m.eventsDirty = false
+	return nil
 }
 
 func (m *Manager) appendEventLocked(event events.Event) {
+	m.eventsDirty = true
 	event.CheckResults = state.CloneCheckResults(event.CheckResults)
 	event.RecoveryResults = state.CloneActionResults(event.RecoveryResults)
 	m.eventHistory.Events = append(m.eventHistory.Events, event)

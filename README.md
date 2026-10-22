@@ -121,7 +121,7 @@ sudo cp systemd/rpi-procmon.env.example /etc/default/rpi-procmon
 
 2. Edit `/etc/rpi-procmon/config.json` for your monitors.
 
-The Scrypted example intentionally ships with a failing placeholder plugin restart command. Replace it with your real Arlo plugin restart command before enabling automated recovery.
+The Scrypted example restarts the Arlo plugin process, then rechecks health before escalating to a container restart. A successful restart command alone does not establish application health.
 
 The built-in `scrypted-arlo` monitor now uses:
 - a target-aware `docker_exec` plugin-process check to confirm `@scrypted/arlo` is present inside the container
@@ -305,6 +305,12 @@ The state file stores everything the daemon tracks for each monitor, including:
 - last recovery action results with command output
 
 ## Events API
+
+Runtime state is saved durably after updates; event history is rewritten only when events change (and once at startup). Failed writes are retried on subsequent updates. Invalid runtime JSON is preserved as a timestamped `.corrupt-*` file before rebuilding state; counters and cooldowns in an unreadable snapshot cannot be recovered. Configuration and filesystem I/O errors still fail startup.
+
+Shell commands have a five-minute maximum runtime, respect shorter caller deadlines, and terminate their local process group on cancellation. Captured output is limited to 8 MiB; exceeding that limit fails the check/action explicitly. SSH connections use a ten-second connection timeout and keepalive checks. Terminating a local SSH client cannot guarantee cancellation of an operation already started on the remote host.
+
+Queued manual operations honor cancellation while waiting for their monitor. Canceled checks do not increment service-failure counters. Recovery records its start and cooldown durably before running actions; if that save fails, no action executes. Interrupted recovery retains the cooldown to limit immediate retries.
 
 `GET /events` exposes recent monitor history for external apps.
 

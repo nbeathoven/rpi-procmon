@@ -7,7 +7,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 )
 
 const (
@@ -97,10 +96,10 @@ func Normalize(cfg *Config) error {
 		if strings.TrimSpace(mon.Target.Transport) == "" {
 			mon.Target.Transport = "local"
 		}
-		if _, err := time.ParseDuration(strings.TrimSpace(mon.Interval)); err != nil {
+		if err := validateDuration(mon.Interval, false); err != nil {
 			return fmt.Errorf("monitor %q interval %q is invalid: %w", mon.ID, mon.Interval, err)
 		}
-		if _, err := time.ParseDuration(strings.TrimSpace(mon.Cooldown)); err != nil {
+		if err := validateDuration(mon.Cooldown, true); err != nil {
 			return fmt.Errorf("monitor %q cooldown %q is invalid: %w", mon.ID, mon.Cooldown, err)
 		}
 		if err := validateTarget(mon.ID, mon.Target); err != nil {

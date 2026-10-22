@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	stdruntime "runtime"
@@ -273,8 +274,11 @@ func runDockerLogPattern(ctx context.Context, runner command.Runner, monitor con
 	cmd := command.BuildDockerLogsCommand(monitor.Target, check.Container, since)
 	outcome, err := runner.Run(ctx, cmd)
 	logText := outcome.Output
-	if err != nil && strings.TrimSpace(logText) == "" {
-		return false, fmt.Sprintf("docker logs failed for %s: %v", check.Container, err), nil
+	if err != nil {
+		return false, fmt.Sprintf("docker logs failed for %s: %v", check.Container, err), map[string]any{
+			"exit_code": outcome.ExitCode,
+			"output":    limitString(logText, 2048),
+		}
 	}
 	count, matchedPatterns, regexErr := countPatternMatches(logText, check.Patterns)
 	if regexErr != nil {
@@ -355,8 +359,9 @@ func runDockerExec(ctx context.Context, runner command.Runner, monitor config.Mo
 	if outcome.ExitCode != expectedExitCode {
 		return false, fmt.Sprintf("docker_exec %s != %d", command.ExitCodeDescription(outcome.ExitCode), expectedExitCode), observations
 	}
-	if err != nil && outcome.ExitCode != expectedExitCode {
-		return false, command.FailureMessage("docker_exec", outcome.ExitCode), observations
+	var exitErr *exec.ExitError
+	if err != nil && !errors.As(err, &exitErr) {
+		return false, "docker_exec execution failed: " + err.Error(), observations
 	}
 	if len(check.ExpectedOutputPatterns) > 0 {
 		matched, err := matchPatterns(output, check.ExpectedOutputPatterns, check.MatchAll)
@@ -393,8 +398,9 @@ func runCommand(ctx context.Context, runner command.Runner, _ config.MonitorConf
 	if outcome.ExitCode != expectedExitCode {
 		return false, fmt.Sprintf("command %s != %d", command.ExitCodeDescription(outcome.ExitCode), expectedExitCode), observations
 	}
-	if err != nil && outcome.ExitCode != expectedExitCode {
-		return false, command.FailureMessage("command", outcome.ExitCode), observations
+	var exitErr *exec.ExitError
+	if err != nil && !errors.As(err, &exitErr) {
+		return false, "command execution failed: " + err.Error(), observations
 	}
 	if len(check.ExpectedOutputPatterns) > 0 {
 		matched, err := matchPatterns(output, check.ExpectedOutputPatterns, check.MatchAll)
