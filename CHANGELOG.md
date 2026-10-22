@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+No changes yet.
+
+## [0.3.0] - 2026-10-21
+
 - Avoid rewriting unchanged event history during normal checks while retaining durable state saves and retrying failed history writes.
 - Bound shell runtime/output and SSH connection waits; terminate local command process groups on cancellation.
 - Reject unsafe scheduling durations, HTTP timeouts, malformed regex patterns, and invalid SSH ports at startup.
@@ -13,7 +17,7 @@ All notable changes to this project will be documented in this file.
 - Preserve corrupted runtime state/event files as timestamped `.corrupt-*` files and rebuild empty runtime data instead of crash-looping. Configuration and I/O errors still fail startup.
 - Flush runtime files and their directory to disk around atomic replacement to improve durability across interrupted shutdowns.
 
-- App revision updated to `eddc6bb`.
+- Default application version updated to `v0.3.0`; deployment builds retain their Git revision in the reported version.
 - Added admin-token-gated procmon control endpoints for manual `check` and `recover` actions.
 - Added versioned `/api/v1/...` API aliases while preserving existing read endpoints.
 - Added per-monitor execution locking so scheduled and manual monitor actions do not overlap for the same service.
