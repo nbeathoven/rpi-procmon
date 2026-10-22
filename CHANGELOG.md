@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 
 No changes yet.
 
+## [0.3.1] - 2026-10-21
+
+- Make overall health severity independent of monitor ordering, so a recovering/checking monitor cannot mask a degraded or failed service.
+- Add aggregation regression coverage while preserving read APIs and individual monitor statuses.
+
 ## [0.3.0] - 2026-10-21
 
 - Avoid rewriting unchanged event history during normal checks while retaining durable state saves and retrying failed history writes.

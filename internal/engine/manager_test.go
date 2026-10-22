@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strconv"
 	"testing"
 	"time"
 
@@ -52,6 +53,61 @@ func testManager(runner command.Runner) (*Manager, config.MonitorConfig) {
 	}
 	m.ensureMonitorStateLocked(monitor).Status = "healthy"
 	return m, monitor
+}
+
+func TestSnapshotAggregatePrecedence(t *testing.T) {
+	// Ascending precedence; checking counts as recovering, while disabled is neutral.
+	statuses := []struct {
+		status  string
+		overall string
+		rank    int
+	}{
+		{"disabled", "healthy", 0},
+		{"healthy", "healthy", 0},
+		{"checking", "recovering", 1},
+		{"recovering", "recovering", 1},
+		{"unknown", "unknown", 2},
+		{"future-status", "unknown", 2},
+		{"degraded", "degraded", 3},
+		{"failed", "failed", 4},
+	}
+	for _, first := range statuses {
+		for _, second := range statuses {
+			t.Run(first.status+"/"+second.status, func(t *testing.T) {
+				m := &Manager{
+					startedAt: time.Now(),
+					current:   state.ProcmonState{Monitors: make(map[string]*state.MonitorRuntimeState)},
+				}
+				counts := make(map[string]int)
+				for i, status := range []string{first.status, second.status} {
+					id := strconv.Itoa(i)
+					m.cfg.Monitors = append(m.cfg.Monitors, config.MonitorConfig{ID: id})
+					m.current.Monitors[id] = &state.MonitorRuntimeState{ID: id, Status: status}
+					counts[status]++
+				}
+				want := first.overall
+				if second.rank > first.rank {
+					want = second.overall
+				}
+				got := m.Snapshot()
+				if got.OverallStatus != want {
+					t.Errorf("overall status = %q, want %q", got.OverallStatus, want)
+				}
+				if got.MonitorCount != 2 || len(got.Monitors) != 2 ||
+					got.HealthyCount != counts["healthy"] ||
+					got.DegradedCount != counts["degraded"] ||
+					got.RecoveringCount != counts["recovering"]+counts["checking"] ||
+					got.FailedCount != counts["failed"] ||
+					got.DisabledCount != counts["disabled"] {
+					t.Errorf("unexpected snapshot counts: %+v", got)
+				}
+			})
+		}
+	}
+	m := &Manager{startedAt: time.Now()}
+	if got := m.Snapshot(); got.OverallStatus != "healthy" || got.MonitorCount != 0 {
+		t.Errorf("empty inventory changed semantics: %+v", got)
+	}
 }
 
 func TestMonitorLockCancellation(t *testing.T) {

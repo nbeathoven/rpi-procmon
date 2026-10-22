@@ -165,7 +165,7 @@ func (m *Manager) Snapshot() state.ProcmonStatus {
 			}
 		case "degraded":
 			degraded++
-			if statusValue == "healthy" {
+			if statusValue != "failed" {
 				statusValue = "degraded"
 			}
 		case "failed":
@@ -174,7 +174,7 @@ func (m *Manager) Snapshot() state.ProcmonStatus {
 		case "disabled":
 			disabled++
 		default:
-			if statusValue == "healthy" {
+			if statusValue == "healthy" || statusValue == "recovering" {
 				statusValue = "unknown"
 			}
 		}
